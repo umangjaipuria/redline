@@ -36,6 +36,8 @@ let anchoredThreadIds = new Set();
 let frameResizeObserver = null;
 let frameViewportCleanup = null;
 let fabTimer = null;
+let pointerSelectionActive = false;
+let localMutationDepth = 0;
 
 // Spacing between stacked margin-note cards (see layoutRail).
 const RAIL_GAP = 12;
@@ -97,46 +99,51 @@ commentForm.addEventListener("submit", async (event) => {
   const threadId = pendingSelection.threadId;
   if (!threadId) return;
 
-  const response = await fetch("/api/comments", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      threadId,
-      author: getAuthorName(),
-      body,
-      quote: pendingSelection.quote,
-      anchor: pendingSelection.anchor,
-      html: cleanFrameHtml(),
-      expectedVersion: state.version,
-    }),
-  });
-  if (response.status === 409) {
-    const payload = await response.json();
-    removeInlineAnchorFromFrame(threadId);
+  const endLocalMutation = beginLocalMutation();
+  try {
+    const response = await fetch("/api/comments", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        threadId,
+        author: getAuthorName(),
+        body,
+        quote: pendingSelection.quote,
+        anchor: pendingSelection.anchor,
+        html: cleanFrameHtml(),
+        expectedVersion: state.version,
+      }),
+    });
+    if (response.status === 409) {
+      const payload = await response.json();
+      removeInlineAnchorFromFrame(threadId);
+      pendingSelection = null;
+      closeComposer({ discardDraft: false });
+      blockedRemoteUpdate = true;
+      showNotice(
+        "Comment paused",
+        payload.error || "The document changed outside this browser. Reload before saving this comment.",
+      );
+      updateToolbar();
+      return;
+    }
+    if (!response.ok) {
+      removeInlineAnchorFromFrame(threadId);
+      pendingSelection = null;
+      closeComposer({ discardDraft: false });
+      const payload = await response.json().catch(() => ({}));
+      showNotice("Comment failed", payload.error || "The comment could not be saved.");
+      updateToolbar();
+      return;
+    }
+    state = await response.json();
+    activeThreadId = threadId;
     pendingSelection = null;
     closeComposer({ discardDraft: false });
-    blockedRemoteUpdate = true;
-    showNotice(
-      "Comment paused",
-      payload.error || "The document changed outside this browser. Reload before saving this comment.",
-    );
-    updateToolbar();
-    return;
+    render({ preserveFrame: true });
+  } finally {
+    endLocalMutation();
   }
-  if (!response.ok) {
-    removeInlineAnchorFromFrame(threadId);
-    pendingSelection = null;
-    closeComposer({ discardDraft: false });
-    const payload = await response.json().catch(() => ({}));
-    showNotice("Comment failed", payload.error || "The comment could not be saved.");
-    updateToolbar();
-    return;
-  }
-  state = await response.json();
-  activeThreadId = threadId;
-  pendingSelection = null;
-  closeComposer({ discardDraft: false });
-  render();
 });
 
 threadsEl.addEventListener("click", async (event) => {
@@ -208,22 +215,27 @@ threadsEl.addEventListener("submit", async (event) => {
     return;
   }
 
-  const response = await fetch(`/api/comments/${encodeURIComponent(threadId)}/replies`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ author: getAuthorName(), body }),
-  });
+  const endLocalMutation = beginLocalMutation();
+  try {
+    const response = await fetch(`/api/comments/${encodeURIComponent(threadId)}/replies`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ author: getAuthorName(), body }),
+    });
 
-  if (!response.ok) {
-    const payload = await readJsonPayload(response);
-    showNotice("Reply failed", payload.error || "Redline could not save this reply.");
-    updateToolbar();
-    return;
+    if (!response.ok) {
+      const payload = await readJsonPayload(response);
+      showNotice("Reply failed", payload.error || "Redline could not save this reply.");
+      updateToolbar();
+      return;
+    }
+
+    state = await response.json();
+    activeThreadId = threadId;
+    render({ preserveFrame: true });
+  } finally {
+    endLocalMutation();
   }
-
-  state = await response.json();
-  activeThreadId = threadId;
-  render();
 });
 
 window.addEventListener("keydown", handleGlobalShortcut);
@@ -316,6 +328,7 @@ async function loadState({ force = false } = {}) {
 function connectEvents() {
   const events = new EventSource("/api/events");
   events.addEventListener("state", (event) => {
+    if (localMutationDepth > 0) return;
     try {
       const payload = JSON.parse(event.data);
       if (state?.version && payload.version === state.version) {
@@ -326,13 +339,28 @@ function connectEvents() {
   });
 }
 
-function render() {
+function beginLocalMutation() {
+  localMutationDepth += 1;
+  let ended = false;
+  return () => {
+    if (ended) return;
+    ended = true;
+    localMutationDepth = Math.max(0, localMutationDepth - 1);
+  };
+}
+
+function render({ preserveFrame = false } = {}) {
   if (!state) return;
   documentPathEl.textContent = state.documentPath;
-  renderFrame();
+  if (!preserveFrame) {
+    renderFrame();
+  }
   renderThreads();
   updateToolbar();
   updateRail();
+  if (preserveFrame) {
+    syncHighlightSelection();
+  }
 }
 
 function setRailCollapsed(collapsed) {
@@ -415,9 +443,8 @@ function repositionSelectionFab() {
   positionSelectionFab();
 }
 
-// Wait until the selection settles before showing the button, so it doesn't
-// track the caret while you're still dragging. Each selection change resets the
-// timer and hides the button; it reappears once changes stop.
+// Show the button only from selection-complete events (mouseup/keyup), never
+// from raw selectionchange while the user may still be dragging.
 function scheduleSelectionFab() {
   hideSelectionFab();
   fabTimer = setTimeout(positionSelectionFab, 180);
@@ -453,6 +480,7 @@ function hideSelectionFab() {
 function renderFrame() {
   anchorStatusReady = false;
   anchoredThreadIds = new Set();
+  pointerSelectionActive = false;
   teardownFrameViewportTracking();
   // Replacing the document invalidates any pending selection (its Range points
   // into the old document) and any queued selection-fab timer.
@@ -483,10 +511,23 @@ function setupFrame() {
   const win = frame.contentWindow;
 
   syncEditMode();
-  doc.addEventListener("selectionchange", updateSelection);
-  doc.addEventListener("mouseup", updateSelection);
-  doc.addEventListener("keyup", updateSelection);
-  doc.addEventListener("keydown", handleGlobalShortcut);
+  doc.addEventListener("selectionchange", () => {
+    updateSelection();
+    if (pointerSelectionActive) hideSelectionFab();
+  });
+  doc.addEventListener("mousedown", () => {
+    pointerSelectionActive = true;
+    hideSelectionFab();
+  });
+  doc.addEventListener("mouseup", () => {
+    pointerSelectionActive = false;
+    updateSelection({ showFab: true });
+  });
+  doc.addEventListener("keyup", () => updateSelection({ showFab: true }));
+  doc.addEventListener("keydown", (event) => {
+    hideSelectionFab();
+    handleGlobalShortcut(event);
+  });
   doc.addEventListener("click", handleFrameClick);
   doc.body.addEventListener("focusin", handleEditableFocus);
   doc.body.addEventListener("focusout", handleEditableBlur);
@@ -826,7 +867,7 @@ function migrateLegacyAnchor(element) {
   element.removeAttribute("data-coauthor-anchor");
 }
 
-function updateSelection() {
+function updateSelection({ showFab = false } = {}) {
   const doc = frame.contentDocument;
   const win = frame.contentWindow;
   if (!doc?.body || !win) return;
@@ -890,7 +931,9 @@ function updateSelection() {
     },
   };
   updateToolbar();
-  scheduleSelectionFab();
+  if (showFab) {
+    scheduleSelectionFab();
+  }
 }
 
 function rangeIntersectsRoot(range, root) {
