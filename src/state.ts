@@ -55,6 +55,23 @@ export interface DocumentState {
   summary: ReviewSummary;
 }
 
+export interface CommentState {
+  documentPath: string;
+  legacySidecarPath: string;
+  version: string;
+  updatedAt: string;
+  threads: CommentThread[];
+  summary: ReviewSummary;
+}
+
+export interface DocumentFileState {
+  documentPath: string;
+  legacySidecarPath: string;
+  version: string;
+  updatedAt: string;
+  summary: ReviewSummary;
+}
+
 export interface CreateCommentInput {
   anchor: CommentAnchor;
   body: string;
@@ -123,6 +140,29 @@ export function readDocumentState(documentPath: string): DocumentState {
     updatedAt: reviewState.updatedAt,
     threads: reviewState.threads,
     summary: summarize(reviewState.threads),
+  };
+}
+
+export function readCommentState(documentPath: string): CommentState {
+  const state = readDocumentState(documentPath);
+  return {
+    documentPath: state.documentPath,
+    legacySidecarPath: state.legacySidecarPath,
+    version: state.version,
+    updatedAt: state.updatedAt,
+    threads: state.threads,
+    summary: state.summary,
+  };
+}
+
+export function readDocumentFileState(documentPath: string): DocumentFileState {
+  const state = readDocumentState(documentPath);
+  return {
+    documentPath: state.documentPath,
+    legacySidecarPath: state.legacySidecarPath,
+    version: state.version,
+    updatedAt: state.updatedAt,
+    summary: state.summary,
   };
 }
 

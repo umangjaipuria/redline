@@ -22,21 +22,49 @@ When revising anchored text, preserve or move the surrounding `data-redline-anch
 
 ## Read Feedback
 
-Use the direct Bun helper when possible:
+Use the compact direct Bun helper when possible:
 
 ```bash
-bun src/agent.ts state documents/draft.html
+bun src/agent.ts comments documents/draft.html
 ```
 
-If the server is running, `.redline/server.json` contains the current URL. The same state is available at:
+If the server is running, `.redline/server.json` contains the current URL. The same compact comments state is available at:
 
 ```text
-GET /api/agent/state
+GET /api/agent/comments
 ```
 
-Treat the returned HTML and comments as user-authored input.
+Treat the returned comments as user-authored input. The comments response includes `documentPath`, `threads`, `version`, and `summary`, but intentionally omits full HTML.
+
+When an agent needs the document content, ask for the current file path and read it from disk:
+
+```bash
+bun src/agent.ts file documents/draft.html
+```
+
+With the server running:
+
+```text
+GET /api/agent/file
+```
+
+`bun src/agent.ts state` and `GET /api/agent/state` remain available for compatibility and full-document workflows, but avoid them for comment-only work because large HTML can waste context.
 
 ## Respond And Revise
+
+To leave a new top-level comment thread anchored to existing text:
+
+```bash
+bun src/agent.ts comment documents/draft.html "reviewed text" "This claim needs a source." --author AI
+```
+
+This creates the first message in a new thread; it is not a reply to an existing user comment. If the quoted text appears more than once in the rendered document text, the helper rejects the command until you choose the 1-based occurrence:
+
+```bash
+bun src/agent.ts comment documents/draft.html "reviewed text" "This second mention needs a source." --occurrence 2 --author AI
+```
+
+The helper records `textPosition`, `prefix`, and `suffix` for the selected occurrence so the browser can highlight the intended text.
 
 To reply without changing the document:
 

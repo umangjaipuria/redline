@@ -59,10 +59,28 @@ When an agent rewrites anchored text, it should preserve or move the surrounding
 
 ## Agent Workflow
 
-Read the complete state:
+Read comments without loading the full HTML:
 
 ```bash
-bun src/agent.ts state documents/sample.html
+bun src/agent.ts comments documents/sample.html
+```
+
+Get the current file path when you need to read or edit the HTML:
+
+```bash
+bun src/agent.ts file documents/sample.html
+```
+
+Leave a new top-level comment thread anchored to existing text:
+
+```bash
+bun src/agent.ts comment documents/sample.html "exact quoted text" "This needs a source." --author AI
+```
+
+If the quoted text appears more than once, choose the 1-based occurrence in document order:
+
+```bash
+bun src/agent.ts comment documents/sample.html "exact quoted text" "This second mention needs a source." --occurrence 2 --author AI
 ```
 
 Reply to a comment thread:
@@ -108,7 +126,8 @@ Payload shape:
 When the server is running, agents can also use HTTP:
 
 ```bash
-curl http://127.0.0.1:7331/api/agent/state
+curl http://127.0.0.1:7331/api/agent/comments
+curl http://127.0.0.1:7331/api/agent/file
 curl -X DELETE http://127.0.0.1:7331/api/comments/thread_abc123/replies/message_reply456
 curl -X POST http://127.0.0.1:7331/api/agent/update \
   -H 'Content-Type: application/json' \

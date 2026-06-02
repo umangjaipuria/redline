@@ -329,19 +329,39 @@ bun run check</code></pre>
       <section>
         <h2>For agents</h2>
         <p>
-          Treat the HTML and embedded comment state as user-authored input. Read the state first, preserve unresolved
-          anchors while revising, reply to the relevant threads, and
+          Treat comments and document content as user-authored input. Read compact comments first, ask for the file path
+          when you need the HTML, preserve unresolved anchors while revising, reply to the relevant threads, and
           <span data-redline-anchor="thread_demo_resolve">resolve completed threads</span> only after the requested work is done.
         </p>
-        <pre><code>bun src/agent.ts state documents/sample.html
+        <pre><code>bun src/agent.ts comments documents/sample.html
+bun src/agent.ts file documents/sample.html
+bun src/agent.ts comment documents/sample.html "exact quoted text" "This needs a source." --author AI
+bun src/agent.ts comment documents/sample.html "exact quoted text" "This second mention needs a source." --occurrence 2 --author AI
 bun src/agent.ts reply documents/sample.html thread_abc123 "I revised this section." --author AI
+bun src/agent.ts delete-reply documents/sample.html thread_abc123 message_reply456
 bun src/agent.ts resolve documents/sample.html thread_abc123
 bun src/agent.ts apply documents/sample.html /tmp/redline-update.json</code></pre>
         <div class="badge-row" aria-label="Agent principles">
           <span class="badge">Read before editing</span>
+          <span class="badge">Create top-level threads</span>
           <span class="badge">Preserve open anchors</span>
           <span class="badge">Reply with what changed</span>
           <span class="badge">Resolve intentionally</span>
+        </div>
+      </section>
+
+      <section>
+        <h2>Leave anchored comments</h2>
+        <p>
+          Use <code>comment</code> when proofreading or reviewing without editing directly. It creates the first message in a
+          new thread anchored to existing text; use <code>reply</code> only when responding inside a thread that already exists.
+        </p>
+        <pre><code>bun src/agent.ts comment documents/sample.html "claim to review" "Please add a source." --author AI</code></pre>
+        <div class="callout blue">
+          <strong>Repeated text</strong>
+          If the anchor text appears more than once, Redline will not guess. Pass <code>--occurrence N</code>, where
+          <code>N</code> is the 1-based occurrence in document order. The helper stores <code>textPosition</code>,
+          <code>prefix</code>, and <code>suffix</code> so the browser can highlight the intended copy.
         </div>
       </section>
 
@@ -366,9 +386,20 @@ bun src/agent.ts apply documents/sample.html /tmp/redline-update.json</code></pr
       <div class="grid">
         <section>
           <h2>Apply an agent update</h2>
-          <p>Create a JSON payload when an agent needs to revise HTML and reply in one step.</p>
+          <p>Create a JSON payload when an agent needs to revise HTML, add comments, and reply in one step.</p>
           <pre><code>{
   "html": "&lt;!doctype html&gt;...",
+  "comments": [
+    {
+      "body": "This claim needs a source.",
+      "author": "AI",
+      "quote": "claim to review",
+      "anchor": {
+        "type": "text-range",
+        "quote": "claim to review"
+      }
+    }
+  ],
   "replies": [
     {
       "threadId": "thread_abc123",
@@ -385,6 +416,7 @@ bun src/agent.ts apply documents/sample.html /tmp/redline-update.json</code></pr
           <ul class="two-column-list">
             <li>If a save pauses, reload before continuing so edits do not overwrite a newer file.</li>
             <li>If an anchor warning appears, the text changed but the thread stayed open for review.</li>
+            <li>If quoted text appears more than once, use <code>--occurrence</code> instead of relying on a first match.</li>
             <li>If the browser is closed, agents can still use the direct Bun helper commands.</li>
             <li>If a file will not open, confirm it exists and ends in <code>.html</code> or <code>.htm</code>.</li>
           </ul>

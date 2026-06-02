@@ -2,6 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { handleAgentRequest } from "./agent-routes";
 import { handleCommentRequest } from "./comment-routes";
 import { appendReply, createComment } from "./state";
 
@@ -35,6 +36,48 @@ function commentRouter(documentPath: string) {
     });
   return { handle, reasons };
 }
+
+function agentRouter(documentPath: string) {
+  return (request: Request) => handleAgentRequest(request, { documentPath });
+}
+
+test("GET /api/agent/comments returns comments without html", async () => {
+  const documentPath = tempDocument();
+  createComment(documentPath, {
+    body: "Comment-only state.",
+    anchor: { type: "document" },
+  });
+
+  const response = agentRouter(documentPath)(
+    new Request("http://127.0.0.1/api/agent/comments"),
+  );
+  const payload = await response.json();
+
+  expect(response.status).toBe(200);
+  expect(payload.documentPath).toBe(documentPath);
+  expect(payload.threads).toHaveLength(1);
+  expect(payload.summary).toEqual({ threads: 1, messages: 1, unresolved: 1 });
+  expect("html" in payload).toBe(false);
+});
+
+test("GET /api/agent/file returns the current file path without html", async () => {
+  const documentPath = tempDocument();
+  createComment(documentPath, {
+    body: "File state.",
+    anchor: { type: "document" },
+  });
+
+  const response = agentRouter(documentPath)(
+    new Request("http://127.0.0.1/api/agent/file"),
+  );
+  const payload = await response.json();
+
+  expect(response.status).toBe(200);
+  expect(payload.documentPath).toBe(documentPath);
+  expect(payload.summary).toEqual({ threads: 1, messages: 1, unresolved: 1 });
+  expect("html" in payload).toBe(false);
+  expect("threads" in payload).toBe(false);
+});
 
 test("POST /api/comments creates a routed comment", async () => {
   const documentPath = tempDocument();
@@ -208,6 +251,14 @@ test("DELETE /api/comments/:threadId/replies/:messageId deletes only that reply"
 test("comment routes return undefined for unrelated requests", async () => {
   const response = await commentRouter(tempDocument()).handle(
     new Request("http://127.0.0.1/api/state", { method: "GET" }),
+  );
+
+  expect(response).toBeUndefined();
+});
+
+test("agent routes return undefined for unrelated requests", () => {
+  const response = agentRouter(tempDocument())(
+    new Request("http://127.0.0.1/api/agent/state", { method: "GET" }),
   );
 
   expect(response).toBeUndefined();

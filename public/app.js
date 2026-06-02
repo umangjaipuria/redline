@@ -1344,6 +1344,9 @@ function findRangeForAnchor(root, anchor) {
   }
 
   if (!quote) return null;
+  const contextual = findContextualRange(text, quote, anchor.prefix, anchor.suffix);
+  if (contextual) return contextual;
+
   const exact = text.indexOf(quote);
   if (exact !== -1) {
     return { start: exact, end: exact + quote.length };
@@ -1354,6 +1357,26 @@ function findRangeForAnchor(root, anchor) {
   const normalizedIndex = normalizedText.indexOf(normalizedQuote);
   if (normalizedIndex === -1) return null;
   return mapNormalizedRange(text, normalizedIndex, normalizedIndex + normalizedQuote.length);
+}
+
+function findContextualRange(text, quote, prefix = "", suffix = "") {
+  if (!prefix && !suffix) return null;
+  const matches = [];
+  let startAt = 0;
+
+  while (startAt <= text.length) {
+    const start = text.indexOf(quote, startAt);
+    if (start === -1) break;
+    const end = start + quote.length;
+    const prefixMatches = !prefix || text.slice(0, start).endsWith(prefix);
+    const suffixMatches = !suffix || text.slice(end).startsWith(suffix);
+    if (prefixMatches && suffixMatches) {
+      matches.push({ start, end });
+    }
+    startAt = end;
+  }
+
+  return matches.length === 1 ? matches[0] : null;
 }
 
 function mapNormalizedRange(original, normalizedStart, normalizedEnd) {

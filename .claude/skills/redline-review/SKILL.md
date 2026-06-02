@@ -28,21 +28,35 @@ or:
 
 If the local server is running, `.redline/server.json` contains the current URL and document path.
 
-## Read State
+## Read Feedback
 
-Prefer the repo helper when available:
+Prefer the compact comments helper when available:
 
 ```bash
-bun src/agent.ts state <document.html>
+bun src/agent.ts comments <document.html>
 ```
 
-With a running server, read:
+With a running server, read comments without loading the full HTML:
 
 ```text
-GET /api/agent/state
+GET /api/agent/comments
 ```
 
-The returned state includes `html`, `threads`, `version`, and `summary`. Each thread has an `id`, `anchor`, `quote`, and `messages`. Message ids are durable; the first message is the original comment, and later messages are replies.
+The returned state includes `documentPath`, `threads`, `version`, and `summary`, but not `html`. Each thread has an `id`, `anchor`, `quote`, and `messages`. Message ids are durable; the first message is the original comment, and later messages are replies.
+
+When an agent needs to inspect or edit the document content, get the current file path and read the file from disk:
+
+```bash
+bun src/agent.ts file <document.html>
+```
+
+With a running server:
+
+```text
+GET /api/agent/file
+```
+
+`file` returns the current `documentPath`, version, update time, and summary without returning HTML. `state` and `GET /api/agent/state` remain available for compatibility and full-document workflows, but avoid them for comment-only work because large HTML can waste context.
 
 ## Preserve Anchors
 
@@ -59,6 +73,19 @@ Rules:
 - Keep `thread.id`, `thread.anchor.anchorId`, and `data-redline-anchor` aligned when possible.
 - Do not add runtime classes such as `redline-highlight`; the app adds those while rendering.
 - If an anchor disappears, Redline may fall back to quote matching, but the thread should remain open until resolved.
+
+### How anchoring resolves in the browser
+
+A thread highlights in two ways, and you can rely on either:
+
+- **Persisted span.** If the HTML contains `<span data-redline-anchor="thread_id">…</span>`, the highlight is durable: it survives edits that move surrounding text, because the location is stored in the file.
+- **Quote match.** If there is no span, the browser re-anchors at render time by matching `anchor.textPosition` first, then `anchor.prefix`/`anchor.suffix` context, and then `anchor.quote` against the document text. The highlight appears in the browser but is *not* written back to the file.
+
+So a comment created with a unique quote, or with a quote plus `textPosition`, will still show up highlighted; you do not have to hand-wrap a span for the comment to be visible. Hand-wrap a span only when you want the anchor to stay put across later text edits. The comment helpers (`comment`, `apply`, `POST /api/comments`) do **not** insert the span for you; they only record the thread.
+
+### Thread and anchor ids
+
+Thread ids and `anchorId` values must match `^thread_[A-Za-z0-9_-]{1,128}$` — they must start with `thread_`. The CLI validates explicit ids. Lower-level state/API paths normalize invalid ids, which can break alignment with a span you wrote by hand. Always prefix your ids with `thread_`.
 
 ## Comments, Replies, And Deletes
 
@@ -87,11 +114,15 @@ bun src/agent.ts resolve <document.html> <thread-id>
 With a running server, agents may use the equivalent HTTP endpoints:
 
 ```text
+POST /api/comments                                   # create a comment (body: CreateCommentInput)
 POST /api/comments/<thread-id>/replies
 DELETE /api/comments/<thread-id>/replies/<message-id>
 POST /api/comments/<thread-id>/resolve
 DELETE /api/comments/<thread-id>
+POST /api/agent/update                               # server twin of `apply` (body: AgentUpdateInput)
 ```
+
+Note: the reply endpoint defaults the author to `User`, not `AI`, so pass `"author": "AI"` explicitly in the JSON body when an agent replies. The CLI `reply`/`comment` commands already default to `AI`.
 
 Use `.redline/server.json` to find the current server URL and document path.
 
@@ -131,7 +162,25 @@ Payloads may include:
 
 ## Add A Comment
 
-For direct HTML editing, choose a unique thread id, wrap the exact target text, and add a matching thread entry. Prefer the browser selection UI or `bun src/agent.ts apply` with a `comments` entry when possible; use manual embedded-state editing only when a helper/API path is not enough.
+Prefer the helper command. It creates a new top-level anchored comment thread, defaults the author to `AI`, and enforces the id rules:
+
+```bash
+bun src/agent.ts comment <document.html> "<exact quoted text>" "Your comment." [--occurrence N] --author AI
+```
+
+The quote must be one shell argument (wrap it in quotes); everything after it is the comment body. This command creates the first message in a new thread; use `reply` only when responding inside an existing thread. Pass `--thread-id thread_xyz` to choose the id (it must start with `thread_`); otherwise one is generated. The quote should match the rendered document text exactly so the browser can highlight it.
+
+If the same quote appears multiple times, the helper rejects the command unless you pass `--occurrence N`, where `N` is the 1-based occurrence in document order:
+
+```bash
+bun src/agent.ts comment <document.html> "growth improved by 40%" "This second claim needs a source." --occurrence 2 --author AI
+```
+
+The helper records the selected occurrence's `textPosition`, `prefix`, and `suffix`. That gives the browser a specific target instead of relying on a first quote match.
+
+On a running server, the equivalent is `POST /api/comments` with a `CreateCommentInput` body, or `bun src/agent.ts apply` / `POST /api/agent/update` with a `comments` entry when batching with replies or an HTML revision.
+
+For direct HTML editing, choose a unique `thread_`-prefixed id, wrap the exact target text in a span, and add a matching thread entry. Use manual embedded-state editing only when a helper/API path is not enough.
 
 HTML:
 
@@ -164,6 +213,6 @@ Embedded state:
 }
 ```
 
-If the same quote appears multiple times, do not rely on quote text alone. Insert the span around the specific occurrence in the HTML, and include `prefix`, `suffix`, or `textPosition` in `anchor` when useful for fallback matching.
+If editing embedded state by hand and the same quote appears multiple times, do not rely on quote text alone. Insert the span around the specific occurrence in the HTML, or include `textPosition` plus `prefix` and `suffix` in `anchor` for fallback matching.
 
 Inside `#redline-state`, escape `<` in JSON strings as `\u003c` to avoid breaking the HTML script tag.

@@ -10,7 +10,9 @@ import {
   defaultDocumentPath,
   ensureDocument,
   legacySidecarPathFor,
+  readCommentState,
   readDocumentState,
+  readDocumentFileState,
   resolveDocumentPath,
   resolveThread,
   sidecarPathFor,
@@ -84,6 +86,37 @@ test("creates, replies to, and resolves comment threads", () => {
   expect(resolved.threads).toHaveLength(0);
   expect(fs.readFileSync(documentPath, "utf8")).not.toContain('id="redline-state"');
   expect(fs.existsSync(sidecarPathFor(documentPath))).toBe(false);
+});
+
+test("reads compact agent states without returning html", () => {
+  const documentPath = tempDocument();
+  const withComment = createComment(documentPath, {
+    body: "Compact state note.",
+    author: "User",
+    anchor: { type: "document" },
+  });
+
+  const comments = readCommentState(documentPath);
+  const file = readDocumentFileState(documentPath);
+
+  expect(comments).toEqual({
+    documentPath,
+    legacySidecarPath: legacySidecarPathFor(documentPath),
+    version: withComment.version,
+    updatedAt: withComment.updatedAt,
+    threads: withComment.threads,
+    summary: withComment.summary,
+  });
+  expect(file).toEqual({
+    documentPath,
+    legacySidecarPath: legacySidecarPathFor(documentPath),
+    version: withComment.version,
+    updatedAt: withComment.updatedAt,
+    summary: withComment.summary,
+  });
+  expect("html" in comments).toBe(false);
+  expect("html" in file).toBe(false);
+  expect("threads" in file).toBe(false);
 });
 
 test("deletes a single reply without removing the thread", () => {

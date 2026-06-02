@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { handleAgentRequest } from "./agent-routes";
 import { handleCommentRequest } from "./comment-routes";
 import {
   applyAgentUpdate,
@@ -106,6 +107,11 @@ async function handleRequest(request: Request, runtime: ServerRuntime): Promise<
   if (url.pathname === "/api/state" || url.pathname === "/api/agent/state") {
     return json(readDocumentState(runtime.options.documentPath));
   }
+
+  const agentResponse = handleAgentRequest(request, {
+    documentPath: runtime.options.documentPath,
+  });
+  if (agentResponse) return agentResponse;
 
   if (url.pathname === "/api/open" && request.method === "POST") {
     const body = await readJson<{ path?: unknown }>(request);
