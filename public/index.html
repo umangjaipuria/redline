@@ -42,15 +42,6 @@
             <input id="authorName" type="text" autocomplete="name" spellcheck="false" placeholder="Your name">
           </label>
           <span class="toolbar-divider" aria-hidden="true"></span>
-          <button id="railToggle" type="button" class="icon-button rail-toggle" hidden
-            title="Show or hide comments" aria-pressed="false">
-            <svg class="btn-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <rect x="3.5" y="5" width="17" height="14" rx="2.2" stroke="currentColor" stroke-width="1.8"/>
-              <path d="M14.5 5v14" stroke="currentColor" stroke-width="1.8"/>
-            </svg>
-            <span class="btn-label">Comments</span>
-            <span id="railToggleCount" class="count-badge">0</span>
-          </button>
           <button id="reloadButton" type="button" class="ghost-button" title="Reload document">
             <svg class="btn-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
@@ -66,12 +57,16 @@
             </svg>
             <span class="btn-label">Edit</span>
           </button>
-          <button id="commentButton" type="button" class="primary-button" disabled title="Comment on selection">
+          <span class="toolbar-divider" aria-hidden="true"></span>
+          <button id="railToggle" type="button" class="ghost-button rail-toggle" hidden
+            title="Hide comments" aria-pressed="false">
             <svg class="btn-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M4.5 6.5A2 2 0 0 1 6.5 4.5h11a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H10l-4 3.5v-3.5H6.5a2 2 0 0 1-2-2z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
-              <path d="M9 10h6M9 7.6h6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+              <rect x="3.5" y="5" width="17" height="14" rx="2.2" stroke="currentColor" stroke-width="1.8"/>
+              <path d="M14.5 5v14" stroke="currentColor" stroke-width="1.8"/>
+              <path class="rail-toggle-fill" d="M14.9 5.4h3.4a1.8 1.8 0 0 1 1.8 1.8v9.6a1.8 1.8 0 0 1-1.8 1.8h-3.4z" fill="currentColor" stroke="none"/>
             </svg>
-            <span class="btn-label">Comment</span>
+            <span class="btn-label">Comments</span>
+            <span id="railToggleCount" class="count-badge">0</span>
           </button>
         </div>
       </header>
@@ -115,45 +110,23 @@
         <aside class="comment-rail" aria-label="Comment threads">
           <div class="comment-rail-inner">
           <section id="composer" class="composer" hidden>
-            <div class="rail-heading">
-              <span class="heading-mark" aria-hidden="true"></span>
-              New comment
-            </div>
-            <blockquote id="selectedQuote"></blockquote>
             <form id="commentForm">
               <textarea id="commentBody" rows="4" placeholder="Add a comment&#8230;"></textarea>
               <div class="composer-actions">
-                <button id="cancelCommentButton" type="button" class="ghost-button">
+                <button id="cancelCommentButton" type="button" class="icon-action" title="Discard comment" aria-label="Discard comment">
                   <svg class="btn-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                     <path d="M6.5 6.5 17.5 17.5M17.5 6.5 6.5 17.5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>
                   </svg>
-                  <span class="btn-label">Cancel</span>
                 </button>
-                <button type="submit" class="primary-button">
+                <button type="submit" class="icon-action primary" title="Post comment" aria-label="Post comment">
                   <svg class="btn-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                     <path d="M4.5 11.5 19 5l-6 14-2.6-5.4z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
                     <path d="m10.4 13.6 4.2-4.2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
                   </svg>
-                  <span class="btn-label">Post</span>
                 </button>
               </div>
             </form>
           </section>
-
-          <div class="rail-summary">
-            <div>
-              <div class="rail-heading">
-                <span class="heading-mark" aria-hidden="true"></span>
-                Open threads
-              </div>
-              <div id="threadCount" class="muted">0 comments</div>
-            </div>
-            <button id="railCloseButton" type="button" class="icon-button rail-close" title="Hide comments">
-              <svg class="btn-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <path d="M9.5 6 15.5 12 9.5 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-            </button>
-          </div>
 
           <div id="threads" class="threads"></div>
           </div>

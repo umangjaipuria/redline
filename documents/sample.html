@@ -1,8 +1,9 @@
 <!doctype html>
-<html lang="en"><head>
+<html lang="en">
+  <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Launch note</title>
+    <title>Redline — sample document</title>
     <style>
       body {
         max-width: 760px;
@@ -16,28 +17,50 @@
       h1,
       h2 {
         font-family: ui-sans-serif, system-ui, sans-serif;
-        line-height: 1.1;
+        line-height: 1.15;
+        letter-spacing: -0.01em;
       }
+
+      h1 { margin-bottom: 8px; }
 
       .lede {
         font-size: 1.18rem;
         color: #40515c;
+        margin-top: 0;
+      }
+
+      p { margin: 0 0 20px; }
+
+      code {
+        font-family: ui-monospace, "SF Mono", Menlo, monospace;
+        font-size: 0.92em;
+        background: #eef2f4;
+        padding: 1px 5px;
+        border-radius: 4px;
       }
     </style>
-  
-  <script type="application/json" id="redline-state">{"schemaVersion":1,"updatedAt":"2026-06-02T05:09:07.530Z","threads":[{"id":"thread_83621ca7fc6f4557","anchor":{"type":"text-range","anchorId":"thread_83621ca7fc6f4557","quote":"Redline","prefix":"\n    Launch note\n    \n      ","suffix":" is a local review surface for HTML documents produced by an AI agent.\n    \n    \n    Working loop\n    \n      The agent c","textPosition":{"start":28,"end":36}},"quote":"Redline","author":"User","createdAt":"2026-06-02T05:04:02.185Z","updatedAt":"2026-06-02T05:04:11.192Z","messages":[{"id":"message_b98cbb642db643b5","author":"User","body":"test","createdAt":"2026-06-02T05:04:02.185Z"},{"id":"message_5ca441b458bd4b1c","author":"User","body":"test test","createdAt":"2026-06-02T05:04:11.192Z"}]},{"id":"thread_a5ab4a2d3ffc4d98","anchor":{"type":"text-range","anchorId":"thread_a5ab4a2d3ffc4d98","quote":"Working","prefix":"    Launch note\n    \n      Redline is a local review surface for HTML documents produced by an AI agent.\n    \n    \n    ","suffix":" loop\n    \n      The agent can update the HTML, reply to comments, and resolve threads once the requested changes are co","textPosition":{"start":121,"end":128}},"quote":"Working","author":"User","createdAt":"2026-06-02T05:04:37.698Z","updatedAt":"2026-06-02T05:04:37.698Z","messages":[{"id":"message_a8f5aab58ed34ead","author":"User","body":"test again","createdAt":"2026-06-02T05:04:37.698Z"}]}]}</script>
+    <script type="application/json" id="redline-state">{"schemaVersion":1,"updatedAt":"2026-06-02T00:00:00.000Z","threads":[{"id":"thread_demo_lede","anchor":{"type":"text-range","anchorId":"thread_demo_lede","quote":"reviewing AI-written HTML","prefix":"","suffix":"","textPosition":{"start":0,"end":25}},"quote":"reviewing AI-written HTML","author":"umang","createdAt":"2026-06-02T16:00:00.000Z","updatedAt":"2026-06-02T16:00:00.000Z","messages":[{"id":"msg_demo_1","author":"umang","body":"Each comment sits level with the text it points at — like notes in a margin.","createdAt":"2026-06-02T16:00:00.000Z"}]},{"id":"thread_demo_anchor","anchor":{"type":"text-range","anchorId":"thread_demo_anchor","quote":"inline anchors","prefix":"","suffix":"","textPosition":{"start":0,"end":14}},"quote":"inline anchors","author":"ai","createdAt":"2026-06-02T16:01:00.000Z","updatedAt":"2026-06-02T16:01:00.000Z","messages":[{"id":"msg_demo_2","author":"ai","body":"When two anchors sit close together, their cards pack so they don't overlap.","createdAt":"2026-06-02T16:01:00.000Z"}]},{"id":"thread_demo_resolve","anchor":{"type":"text-range","anchorId":"thread_demo_resolve","quote":"resolve threads","prefix":"","suffix":"","textPosition":{"start":0,"end":15}},"quote":"resolve threads","author":"umang","createdAt":"2026-06-02T16:02:00.000Z","updatedAt":"2026-06-02T16:02:00.000Z","messages":[{"id":"msg_demo_3","author":"umang","body":"Click a comment (or the highlighted text) and it springs to its anchor and lights up.","createdAt":"2026-06-02T16:02:00.000Z"}]}]}</script>
   </head>
   <body>
-    <h1>Launch note</h1>
+    <h1>Welcome to Redline</h1>
     <p class="lede">
-      <span data-redline-anchor="thread_83621ca7fc6f4557">Redline</span> is a local review surface for HTML documents produced by an AI agent.
+      Redline is a local review surface for <span data-redline-anchor="thread_demo_lede">reviewing AI-written HTML</span>
+      documents. Select any text, leave a comment, and it appears in the margin beside what you marked.
     </p>
-    <p><br></p>
-    <h2><span data-redline-anchor="thread_a5ab4a2d3ffc4d98">Working</span> loop</h2>
+
+    <h2>How comments are stored</h2>
     <p>
-      The agent can update the HTML, reply to comments, and resolve threads once the requested changes are complete.
+      Comment locations are marked with lightweight <span data-redline-anchor="thread_demo_anchor">inline anchors</span>
+      wrapped around the reviewed text, and the thread messages live in an inert <code>application/json</code> script
+      tag. The document and its open review state stay together in one HTML file.
     </p>
-  
 
-
-</body></html>
+    <h2>The working loop</h2>
+    <p>
+      Set your name in the top bar, select text, and click <code>Comment</code>. An agent can read the same state,
+      edit the HTML, reply to your threads, and <span data-redline-anchor="thread_demo_resolve">resolve threads</span>
+      once the requested changes are complete. Changes autosave back to the original file, and the open browser
+      updates as the document changes underneath it.
+    </p>
+  </body>
+</html>

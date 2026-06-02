@@ -3,23 +3,21 @@ const documentPathEl = document.querySelector("#documentPath");
 const saveStatusEl = document.querySelector("#saveStatus");
 const reloadButton = document.querySelector("#reloadButton");
 const editButton = document.querySelector("#editButton");
-const commentButton = document.querySelector("#commentButton");
 const authorNameInput = document.querySelector("#authorName");
 const composer = document.querySelector("#composer");
-const selectedQuoteEl = document.querySelector("#selectedQuote");
 const commentForm = document.querySelector("#commentForm");
 const commentBody = document.querySelector("#commentBody");
 const cancelCommentButton = document.querySelector("#cancelCommentButton");
 const threadsEl = document.querySelector("#threads");
-const threadCountEl = document.querySelector("#threadCount");
 const notice = document.querySelector("#notice");
 const noticeTitle = document.querySelector("#noticeTitle");
 const noticeBody = document.querySelector("#noticeBody");
 const noticeAction = document.querySelector("#noticeAction");
 const appShell = document.querySelector(".app-shell");
+const commentRail = document.querySelector(".comment-rail");
+const commentRailInner = document.querySelector(".comment-rail-inner");
 const railToggle = document.querySelector("#railToggle");
 const railToggleCount = document.querySelector("#railToggleCount");
-const railCloseButton = document.querySelector("#railCloseButton");
 const openButton = document.querySelector("#openButton");
 const selectionFab = document.querySelector("#selectionFab");
 
@@ -37,6 +35,11 @@ let anchorStatusReady = false;
 let anchoredThreadIds = new Set();
 let frameResizeObserver = null;
 let fabTimer = null;
+
+// Spacing for the margin-note layout (see layoutRail): gap between stacked
+// cards and the inset that pads the rail's bottom.
+const RAIL_GAP = 12;
+const RAIL_INSET = 16;
 
 authorNameInput.value = getStoredAuthorName();
 
@@ -57,10 +60,7 @@ editButton.addEventListener("click", () => {
   updateToolbar();
 });
 
-commentButton.addEventListener("click", beginCommentFromSelection);
-
 railToggle.addEventListener("click", () => setRailCollapsed(!railCollapsed));
-railCloseButton.addEventListener("click", () => setRailCollapsed(true));
 
 openButton.addEventListener("click", () => void openViaDialog());
 selectionFab.addEventListener("mousedown", (event) => event.preventDefault());
@@ -68,7 +68,10 @@ selectionFab.addEventListener("click", () => {
   beginCommentFromSelection();
 });
 window.addEventListener("scroll", repositionSelectionFab, true);
-window.addEventListener("resize", repositionSelectionFab);
+window.addEventListener("resize", () => {
+  repositionSelectionFab();
+  layoutRail();
+});
 
 cancelCommentButton.addEventListener("click", () => closeComposer({ discardDraft: true }));
 commentBody.addEventListener("keydown", submitFormOnCommandEnter);
@@ -126,13 +129,22 @@ commentForm.addEventListener("submit", async (event) => {
 });
 
 threadsEl.addEventListener("click", async (event) => {
+  // Use Element, not HTMLElement: clicking the SVG icon inside a button makes
+  // event.target an SVGElement, which still has closest() for delegation.
   const target = event.target;
-  if (!(target instanceof HTMLElement)) return;
+  if (!(target instanceof Element)) return;
 
   const resolveButton = target.closest("[data-resolve-thread]");
   if (resolveButton instanceof HTMLElement) {
     const id = resolveButton.getAttribute("data-resolve-thread");
     if (id) await resolveComment(id);
+    return;
+  }
+
+  const replyToggle = target.closest("[data-reply-toggle]");
+  if (replyToggle instanceof HTMLElement) {
+    const id = replyToggle.getAttribute("data-reply-toggle");
+    if (id) openReplyForThread(id);
     return;
   }
 
@@ -310,11 +322,14 @@ function updateRail() {
       ? "closed"
       : "open";
 
+  const open = mode === "open";
   appShell.dataset.rail = mode;
   railToggle.hidden = threadCount === 0;
-  railToggle.setAttribute("aria-pressed", mode === "open" ? "true" : "false");
-  railToggle.classList.toggle("active", mode === "open");
+  railToggle.setAttribute("aria-pressed", open ? "true" : "false");
+  railToggle.classList.toggle("active", open);
+  railToggle.title = open ? "Hide comments" : "Show comments";
   railToggleCount.textContent = String(threadCount);
+  layoutRail();
 }
 
 // ---------- Open another file (native OS picker) ----------
@@ -432,6 +447,9 @@ function resizeFrameToContent() {
   if (height > 0 && Math.abs(parseFloat(frame.style.height || "0") - height) > 1) {
     frame.style.height = `${height}px`;
   }
+  // The document's height drives where every anchor sits, so re-place the
+  // margin notes whenever it reflows (fonts/images loading, window resize).
+  layoutRail();
 }
 
 function setupFrame() {
@@ -774,6 +792,20 @@ function updateSelection() {
 
   const selection = win.getSelection();
   if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+    // A bare caret resting inside an anchored span focuses that thread (so
+    // clicking into the highlighted text lights up its comment); a caret
+    // anywhere else clears the active thread.
+    if (selection?.isCollapsed) {
+      const node = selection.anchorNode;
+      const element = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
+      const highlight = element?.closest?.(".redline-highlight, .coauthor-highlight");
+      const id = highlight?.getAttribute("data-thread-id");
+      if (id) {
+        if (id !== activeThreadId) selectThread(id, true);
+      } else {
+        deselectThread();
+      }
+    }
     pendingSelection = null;
     hideSelectionFab();
     updateToolbar();
@@ -838,13 +870,115 @@ function beginCommentFromSelection() {
 }
 
 function openComposer() {
-  selectedQuoteEl.textContent = pendingSelection.quote;
   commentBody.value = "";
   composer.hidden = false;
   hideSelectionFab();
   // Commenting implies you want the rail; reopen it and keep it open afterward.
   setRailCollapsed(false);
+  layoutRail();
   commentBody.focus();
+}
+
+// ---------- Margin-note layout ----------
+//
+// The composer and every thread card are absolutely positioned in the rail and
+// lined up with the text they annotate, so a comment sits level with its
+// anchor instead of stacking at the top. When anchors are close their cards
+// would overlap, so we pack them: top-down by anchor order, then the active
+// card (open composer, or the selected thread) springs to its exact anchor and
+// pushes its neighbours out of the way.
+
+// Top edge of a thread's in-document highlight, in the parent viewport.
+function anchorViewportTop(threadId) {
+  const doc = frame.contentDocument;
+  if (!doc || !threadId) return null;
+  const span = doc.querySelector(
+    `.redline-highlight[data-thread-id="${cssEscape(threadId)}"], .coauthor-highlight[data-thread-id="${cssEscape(threadId)}"]`,
+  );
+  const rect = span?.getClientRects()[0];
+  if (!rect) return null;
+  return frame.getBoundingClientRect().top + rect.top;
+}
+
+function layoutRail() {
+  if (!commentRailInner) return;
+
+  // Single-column (narrow) layout: there's no margin to align to, so drop the
+  // absolute offsets and let the cards stack in normal flow (see CSS).
+  if (window.matchMedia("(max-width: 940px)").matches) {
+    commentRailInner.style.height = "";
+    composer.style.top = "";
+    for (const card of threadsEl.querySelectorAll(".thread-card")) card.style.top = "";
+    return;
+  }
+
+  if (appShell.dataset.rail !== "open") return;
+
+  const innerTop = commentRailInner.getBoundingClientRect().top;
+  const items = [];
+
+  if (!composer.hidden) {
+    items.push({
+      el: composer,
+      desired: relativeTop(anchorViewportTop(pendingSelection?.threadId), innerTop),
+      active: true,
+    });
+  }
+  for (const card of threadsEl.querySelectorAll(".thread-card[data-thread-id]")) {
+    const id = card.getAttribute("data-thread-id");
+    items.push({
+      el: card,
+      desired: relativeTop(anchorViewportTop(id), innerTop),
+      active: composer.hidden && id === activeThreadId,
+    });
+  }
+  if (items.length === 0) {
+    commentRailInner.style.height = "";
+    return;
+  }
+
+  for (const item of items) item.height = item.el.offsetHeight;
+
+  // Anchored cards lay out by position; unanchored ones (anchor text changed)
+  // just pile up after them.
+  const anchored = items.filter((i) => i.desired != null).sort((a, b) => a.desired - b.desired);
+  const unanchored = items.filter((i) => i.desired == null);
+
+  let cursor = 0;
+  for (const item of anchored) {
+    item.top = Math.max(item.desired, cursor);
+    cursor = item.top + item.height + RAIL_GAP;
+  }
+
+  const activeIdx = anchored.findIndex((i) => i.active);
+  if (activeIdx !== -1) {
+    anchored[activeIdx].top = Math.max(0, anchored[activeIdx].desired);
+    for (let i = activeIdx - 1; i >= 0; i -= 1) {
+      const ceil = anchored[i + 1].top - anchored[i].height - RAIL_GAP;
+      anchored[i].top = Math.min(anchored[i].top, ceil);
+    }
+    for (let i = activeIdx + 1; i < anchored.length; i += 1) {
+      const floor = anchored[i - 1].top + anchored[i - 1].height + RAIL_GAP;
+      anchored[i].top = Math.max(anchored[i].top, floor);
+    }
+  }
+
+  for (const item of unanchored) {
+    item.top = cursor;
+    cursor = item.top + item.height + RAIL_GAP;
+  }
+
+  let maxBottom = 0;
+  for (const item of [...anchored, ...unanchored]) {
+    const top = Math.max(0, item.top);
+    item.el.style.top = `${top}px`;
+    maxBottom = Math.max(maxBottom, top + item.height);
+  }
+  commentRailInner.style.height = `${maxBottom + RAIL_INSET}px`;
+}
+
+function relativeTop(viewportTop, innerTop) {
+  return viewportTop == null ? null : viewportTop - innerTop;
 }
 
 function closeComposer({ discardDraft = false } = {}) {
@@ -853,6 +987,7 @@ function closeComposer({ discardDraft = false } = {}) {
     pendingSelection = null;
   }
   composer.hidden = true;
+  composer.style.top = "";
   commentBody.value = "";
   updateToolbar();
   updateRail();
@@ -920,21 +1055,16 @@ function renderThreads() {
     return leftStart - rightStart || left.createdAt.localeCompare(right.createdAt);
   });
 
-  threadCountEl.textContent = `${threads.length} ${threads.length === 1 ? "thread" : "threads"}`;
-
   if (threads.length === 0) {
-    // While composing the first comment the composer already explains the
-    // context, so the empty-state would just be noise.
-    threadsEl.innerHTML = composer.hidden
-      ? `<div class="empty-state">No open comments.</div>`
-      : "";
+    // The rail only shows at all when there's a thread or an open composer, so
+    // an empty-state here would never be the whole story — leave it blank.
+    threadsEl.innerHTML = "";
     return;
   }
 
   threadsEl.innerHTML = threads
     .map((thread) => {
       const active = thread.id === activeThreadId;
-      const quote = thread.quote || thread.anchor.quote || "Document comment";
       const anchorMissing =
         anchorStatusReady &&
         thread.anchor.type === "text-range" &&
@@ -955,30 +1085,35 @@ function renderThreads() {
 
       return `
         <article class="thread-card ${active ? "active" : ""} ${anchorMissing ? "unanchored" : ""}" data-thread-id="${escapeHtml(thread.id)}">
-          <button type="button" class="thread-target" data-thread-id="${escapeHtml(thread.id)}">
-            <span>${escapeHtml(quote)}</span>
-          </button>
           ${
             anchorMissing
               ? `<div class="anchor-warning">Anchor text changed. Thread kept until resolved.</div>`
               : ""
           }
           ${messages}
-          <form class="reply-form" data-reply-form="${escapeHtml(thread.id)}">
+          <div class="thread-foot">
+            <button type="button" class="icon-action" data-reply-toggle="${escapeHtml(thread.id)}" title="Reply" aria-label="Reply">
+              <svg class="btn-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M9.5 7 5 11.5 9.5 16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M5 11.5h8.5a5 5 0 0 1 5 5V18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+            <button type="button" class="icon-action danger" data-resolve-thread="${escapeHtml(thread.id)}" title="Delete comment" aria-label="Delete comment">
+              <svg class="btn-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M5 7h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                <path d="M9.5 7V5.6a1.1 1.1 0 0 1 1.1-1.1h2.8a1.1 1.1 0 0 1 1.1 1.1V7" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+                <path d="M6.7 7.5 7.6 18.6A1.4 1.4 0 0 0 9 20h6a1.4 1.4 0 0 0 1.4-1.4L17.3 7.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+          </div>
+          <form class="reply-form" data-reply-form="${escapeHtml(thread.id)}" hidden>
             <textarea rows="2" placeholder="Reply&#8230;"></textarea>
             <div class="thread-actions">
-              <button type="submit" class="ghost-button">
+              <button type="submit" class="icon-action primary" title="Send reply" aria-label="Send reply">
                 <svg class="btn-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <path d="M9.5 7 5 11.5 9.5 16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-                  <path d="M5 11.5h8.5a5 5 0 0 1 5 5V18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M4.5 11.5 19 5l-6 14-2.6-5.4z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+                  <path d="m10.4 13.6 4.2-4.2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
                 </svg>
-                <span class="btn-label">Reply</span>
-              </button>
-              <button type="button" class="ghost-button" data-resolve-thread="${escapeHtml(thread.id)}">
-                <svg class="btn-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <path d="M5 12.5 10 17.5 19 6.5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-                <span class="btn-label">Resolve</span>
               </button>
             </div>
           </form>
@@ -986,21 +1121,52 @@ function renderThreads() {
       `;
     })
     .join("");
+
+  layoutRail();
+}
+
+// Reveal a thread's reply box (hidden by default to keep cards compact), focus
+// it, and make that thread active.
+function openReplyForThread(threadId) {
+  const card = threadsEl.querySelector(`.thread-card[data-thread-id="${cssEscape(threadId)}"]`);
+  const form = card?.querySelector(".reply-form");
+  if (!form) return;
+  form.hidden = false;
+  activateThreadWithoutRender(threadId);
+  layoutRail();
+  form.querySelector("textarea")?.focus();
 }
 
 function handleFrameClick(event) {
   const target = event.target;
-  if (!(target instanceof frame.contentWindow.HTMLElement)) return;
+  if (!(target instanceof frame.contentWindow.Element)) return;
   const highlight = target.closest(".redline-highlight, .coauthor-highlight");
-  if (!highlight) return;
+  // Clicking the anchored text springs its card into place without scrolling
+  // (you're already looking at the anchor). Clicking anywhere else in the
+  // document drops the comment back to its resting, inactive state.
+  if (!highlight) {
+    deselectThread();
+    return;
+  }
   const threadId = highlight.getAttribute("data-thread-id");
-  if (threadId) selectThread(threadId);
+  if (threadId) selectThread(threadId, true);
+}
+
+function deselectThread() {
+  if (!activeThreadId) return;
+  activeThreadId = null;
+  for (const card of threadsEl.querySelectorAll(".thread-card.active")) {
+    card.classList.remove("active");
+  }
+  syncHighlightSelection();
+  layoutRail();
 }
 
 function selectThread(threadId, keepFocus = false) {
-  activeThreadId = threadId;
-  renderThreads();
-  syncHighlightSelection();
+  activateThreadWithoutRender(threadId);
+  // Re-place the notes so the now-active card springs to its anchor and the
+  // others move out of its way.
+  layoutRail();
   if (!keepFocus) {
     scrollToThreadAnchor(threadId);
   }
@@ -1194,7 +1360,6 @@ function scrollToThreadAnchor(threadId) {
 function updateToolbar() {
   editButton.querySelector(".btn-label").textContent = editMode ? "Editing" : "Edit";
   editButton.classList.toggle("active", editMode);
-  commentButton.disabled = !pendingSelection;
 
   // The save indicator is only meaningful for document edits: show it while
   // editing, mid-save, with unsaved changes, or on a conflict. When you're just

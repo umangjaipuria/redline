@@ -196,6 +196,12 @@ button.open-icon:disabled {
   background: var(--line);
 }
 
+/* The rail toggle is hidden until a comment exists; drop the divider that
+   precedes it too, so no stray separator floats at the right edge. */
+.toolbar-divider:has(+ .rail-toggle[hidden]) {
+  display: none;
+}
+
 .author-control {
   display: flex;
   align-items: center;
@@ -334,10 +340,15 @@ button.open-icon:disabled {
   height: 17px;
 }
 
-.rail-toggle.active {
-  border-color: var(--line);
-  color: var(--ink);
-  background: var(--panel-raised);
+/* The toggle sits at the far right and reflects rail state: when the rail is
+   open it takes the pressed (.active) look from .ghost-button.active and the
+   icon's side panel fills in; when closed it's a plain outline. */
+.rail-toggle-fill {
+  display: none;
+}
+
+.rail-toggle.active .rail-toggle-fill {
+  display: inline;
 }
 
 .count-badge {
@@ -352,18 +363,6 @@ button.open-icon:disabled {
   font-size: 10.5px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
-}
-
-/* In-rail close button (chevron). */
-.rail-close {
-  border-color: transparent;
-  background: transparent;
-  padding: 0 6px;
-}
-
-.rail-close:hover {
-  background: var(--red-wash);
-  border-color: transparent;
 }
 
 .ghost-button:hover {
@@ -399,6 +398,54 @@ button.open-icon:disabled {
   background: var(--paper-deep);
   color: var(--ink-faint);
   box-shadow: none;
+}
+
+/* Square, label-free buttons used inside the comment rail (composer + thread
+   actions). The intent lives in the icon and the title/aria-label. */
+.icon-action {
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--panel-raised);
+  color: var(--ink-soft);
+  transition: transform 80ms ease, border-color 140ms ease, background-color 140ms ease,
+    color 140ms ease, box-shadow 140ms ease;
+}
+
+.icon-action .btn-icon {
+  width: 17px;
+  height: 17px;
+}
+
+.icon-action:hover {
+  border-color: var(--red-line);
+  color: var(--red-deep);
+  background: var(--red-wash);
+}
+
+.icon-action:active {
+  transform: translateY(1px);
+}
+
+.icon-action.primary {
+  border-color: transparent;
+  color: #fff;
+  background: linear-gradient(160deg, var(--red) 0%, var(--red-deep) 100%);
+  box-shadow: 0 4px 14px rgba(196, 54, 29, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+
+.icon-action.primary:hover {
+  box-shadow: 0 6px 20px rgba(196, 54, 29, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+
+.icon-action.danger:hover {
+  border-color: var(--red);
+  color: #fff;
+  background: var(--red);
 }
 
 /* ---------- Workspace ---------- */
@@ -482,98 +529,49 @@ button.open-icon:disabled {
 
 /* ---------- Comment rail ---------- */
 
+/* The rail is a margin: it scrolls with the page (not pinned) so each comment
+   can sit level with the text it annotates. Cards are absolutely positioned by
+   JS (layoutRail); the rail just provides the white column and the positioning
+   context. */
 .comment-rail {
   min-width: 0;
-  /* Stick alongside the document and scroll independently so comments stay in
-     view while a long document scrolls the page. */
-  position: sticky;
-  top: 52px;
-  align-self: start;
-  max-height: calc(100vh - 52px);
   border-left: 1px solid var(--line);
-  background: var(--rail-bg);
-  padding: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
+  background: var(--paper);
+  overflow: visible;
 }
 
-/* When collapsed, clip contents to a fixed width so the panel slides out
-   cleanly instead of reflowing as the grid column shrinks. */
+/* When collapsed, clip the fixed-width contents so the panel slides out
+   cleanly as the grid column shrinks to zero. */
 .app-shell[data-rail="empty"] .comment-rail,
 .app-shell[data-rail="closed"] .comment-rail {
   border-left-color: transparent;
+  overflow: hidden;
 }
 
 .comment-rail-inner {
+  position: relative;
   width: 360px;
   max-width: 100%;
-  padding: 16px 16px 28px;
 }
 
-.rail-summary,
+/* Composer and cards are pulled out of flow and dropped next to their anchor.
+   left/right inset them inside the rail; `top` comes from JS. */
 .composer,
-.thread-card,
-.empty-state {
+.thread-card {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  top: 16px;
   border: 1px solid var(--line);
   border-radius: 13px;
   background: var(--panel-raised);
 }
 
-.rail-summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 12px 12px 12px 15px;
-  margin-bottom: 12px;
-  box-shadow: var(--shadow-card);
-}
-
-.rail-heading {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-family: var(--font-display);
-  font-weight: 600;
-  font-size: 16px;
-  letter-spacing: -0.01em;
-  color: var(--ink);
-}
-
-.heading-mark {
-  width: 14px;
-  height: 3px;
-  border-radius: 2px;
-  background: var(--red);
-  flex: none;
-}
-
-.muted {
-  color: var(--ink-soft);
-  font-size: 12.5px;
-  font-weight: 500;
-  margin-top: 4px;
-  letter-spacing: 0.01em;
-}
-
 .composer {
-  padding: 16px;
-  margin-bottom: 14px;
+  z-index: 40;
+  padding: 12px;
   box-shadow: var(--shadow-float);
-  animation: fade-up 0.35s cubic-bezier(0.2, 0.8, 0.2, 1) both;
-}
-
-.composer blockquote {
-  margin: 12px 0;
-  padding: 10px 12px;
-  border-left: 3px solid var(--red);
-  border-radius: 0 8px 8px 0;
-  color: var(--ink-soft);
-  background: var(--red-wash);
-  font-family: var(--font-display);
-  font-style: italic;
-  font-size: 14px;
-  line-height: 1.45;
+  animation: fade-up 0.2s cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 
 textarea {
@@ -609,15 +607,13 @@ textarea:focus {
 }
 
 .threads {
-  display: grid;
-  gap: 12px;
+  display: contents;
 }
 
 .thread-card {
-  padding: 14px;
-  box-shadow: var(--shadow-card);
-  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
-  animation: fade-up 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  padding: 13px 14px;
+  transition: top 200ms cubic-bezier(0.2, 0.8, 0.2, 1), border-color 160ms ease,
+    box-shadow 160ms ease;
 }
 
 .thread-card.unanchored {
@@ -625,48 +621,22 @@ textarea:focus {
   background: linear-gradient(180deg, #fdf6e6 0%, var(--panel-raised) 60%);
 }
 
-.thread-card.active {
+/* The focused comment (anchor clicked, caret in the anchor, card clicked, or
+   reply box focused) pops above the rest; inactive cards stay flat so it reads
+   as the one in play. We key off the reply textarea specifically rather than
+   :focus-within so that merely clicking the reply/delete icons (which focuses
+   the button) doesn't pin a card as active. */
+.thread-card.active,
+.thread-card:has(.reply-form textarea:focus) {
   border-color: var(--red);
-  box-shadow: 0 0 0 3px var(--red-wash), var(--shadow-card);
-  transform: translateY(-1px);
+  box-shadow: 0 0 0 3px var(--red-wash), var(--shadow-float);
+  z-index: 30;
 }
 
-.thread-target {
-  display: flex;
-  width: 100%;
-  border: 0;
-  background: transparent;
-  padding: 0 0 0 12px;
-  text-align: left;
-  color: var(--ink);
-  font-family: var(--font-display);
-  font-style: italic;
-  font-size: 14.5px;
-  line-height: 1.45;
-  position: relative;
-}
-
-.thread-target::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 2px;
-  bottom: 2px;
-  width: 3px;
-  border-radius: 2px;
-  background: var(--red-line);
-}
-
-.thread-card.active .thread-target::before {
-  background: var(--red);
-}
-
-.thread-target span {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-  line-clamp: 3;
-  overflow: hidden;
+.message:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
 }
 
 .anchor-warning {
@@ -732,32 +702,16 @@ textarea:focus {
   color: var(--ink-faint);
 }
 
+/* Row of icon actions (reply, delete) under a comment. */
+.thread-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
 .reply-form {
-  margin-top: 14px;
-}
-
-.reply-form .ghost-button,
-.thread-actions .ghost-button {
-  height: 32px;
-  padding: 0 11px;
-  font-size: 12.5px;
-}
-
-.reply-form .btn-icon {
-  width: 15px;
-  height: 15px;
-}
-
-.empty-state {
-  padding: 32px 18px;
-  color: var(--ink-soft);
-  text-align: center;
-  font-family: var(--font-display);
-  font-style: italic;
-  font-size: 14px;
-  background: transparent;
-  border-style: dashed;
-  box-shadow: none;
+  margin-top: 12px;
 }
 
 /* ---------- Animations ---------- */
@@ -834,5 +788,28 @@ textarea:focus {
   .comment-rail {
     border-left: 0;
     border-top: 1px solid var(--line);
+  }
+
+  /* No side column to align to — drop the margin notes back into normal flow,
+     stacked top to bottom. (layoutRail clears the inline `top`/`height` here.) */
+  .comment-rail-inner {
+    width: auto;
+    padding: 16px;
+  }
+
+  .threads {
+    display: grid;
+    gap: 12px;
+  }
+
+  .composer,
+  .thread-card {
+    position: static;
+    left: auto;
+    right: auto;
+  }
+
+  .composer {
+    margin-bottom: 14px;
   }
 }
