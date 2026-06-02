@@ -38,9 +38,12 @@ let frameViewportCleanup = null;
 let fabTimer = null;
 let pointerSelectionActive = false;
 let localMutationDepth = 0;
+let railAutoFollowPaused = false;
+let railProgrammaticScrollDepth = 0;
+let railRevealFrame = null;
+let railRevealTimer = null;
 
-// Spacing between stacked margin-note cards (see layoutRail).
-const RAIL_GAP = 12;
+const RAIL_EDGE_PADDING = 16;
 
 authorNameInput.value = getStoredAuthorName();
 
@@ -62,6 +65,10 @@ editButton.addEventListener("click", () => {
 });
 
 railToggle.addEventListener("click", () => setRailCollapsed(!railCollapsed));
+commentRail.addEventListener("scroll", () => {
+  if (railProgrammaticScrollDepth > 0) return;
+  railAutoFollowPaused = true;
+}, { passive: true });
 
 openButton.addEventListener("click", () => void openViaDialog());
 selectionFab.addEventListener("mousedown", (event) => event.preventDefault());
@@ -500,9 +507,10 @@ function teardownFrameViewportTracking() {
   frameResizeObserver = null;
 }
 
-function syncFrameViewport() {
+function syncFrameViewport({ followRail = false } = {}) {
   layoutRail();
   repositionSelectionFab();
+  if (followRail) syncRailToFrameViewport();
 }
 
 function setupFrame() {
@@ -544,22 +552,27 @@ function setupFrame() {
   const onViewportChange = () => {
     if (trackingActive) syncFrameViewport();
   };
-  win?.addEventListener("scroll", onViewportChange, { passive: true });
+  const onFrameScroll = () => {
+    if (!trackingActive) return;
+    railAutoFollowPaused = false;
+    syncFrameViewport({ followRail: true });
+  };
+  win?.addEventListener("scroll", onFrameScroll, { passive: true });
   win?.addEventListener("resize", onViewportChange);
-  doc.addEventListener("scroll", onViewportChange, { capture: true, passive: true });
+  doc.addEventListener("scroll", onFrameScroll, { capture: true, passive: true });
   doc.fonts?.ready.then(onViewportChange).catch(() => {});
   frameResizeObserver = new ResizeObserver(onViewportChange);
   frameResizeObserver.observe(doc.body);
   frameResizeObserver.observe(doc.documentElement);
   frameViewportCleanup = () => {
     trackingActive = false;
-    win?.removeEventListener("scroll", onViewportChange);
+    win?.removeEventListener("scroll", onFrameScroll);
     win?.removeEventListener("resize", onViewportChange);
-    doc.removeEventListener("scroll", onViewportChange, { capture: true });
+    doc.removeEventListener("scroll", onFrameScroll, { capture: true });
     frameResizeObserver?.disconnect();
     frameResizeObserver = null;
   };
-  syncFrameViewport();
+  syncFrameViewport({ followRail: true });
 }
 
 function prepareHtmlForFrame(html) {
@@ -965,104 +978,132 @@ function openComposer() {
   commentBody.focus();
 }
 
-// ---------- Margin-note layout ----------
+// ---------- Comment rail viewport sync ----------
 //
-// The composer and every thread card are absolutely positioned in the rail and
-// lined up with the text they annotate, so a comment sits level with its
-// anchor instead of stacking at the top. When anchors are close their cards
-// would overlap, so we pack them: top-down by anchor order, then the active
-// card (open composer, or the selected thread) springs to its exact anchor and
-// pushes its neighbours out of the way.
-
-// Top edge of a thread's in-document highlight, in the parent viewport.
-function anchorViewportTop(threadId) {
-  const doc = frame.contentDocument;
-  if (!doc || !threadId) return null;
-  const span = doc.querySelector(
-    `.redline-highlight[data-thread-id="${cssEscape(threadId)}"], .coauthor-highlight[data-thread-id="${cssEscape(threadId)}"]`,
-  );
-  const rect = span?.getClientRects()[0];
-  if (!rect) return null;
-  return frame.getBoundingClientRect().top + rect.top;
-}
-
+// Thread cards stay in document order in the independently scrollable rail.
+// As the iframe scrolls, the rail activates and reveals the thread whose anchor
+// is visible or nearest to the document viewport.
 function layoutRail() {
   if (!commentRailInner) return;
-
-  // Single-column (narrow) layout: there's no margin to align to, so drop the
-  // absolute offsets and let the cards stack in normal flow (see CSS).
-  if (window.matchMedia("(max-width: 940px)").matches) {
-    commentRailInner.style.height = "";
-    composer.style.top = "";
-    for (const card of threadsEl.querySelectorAll(".thread-card")) card.style.top = "";
-    return;
-  }
-
-  if (appShell.dataset.rail !== "open") return;
-
-  const innerTop = commentRailInner.getBoundingClientRect().top;
-  const items = [];
-
-  if (!composer.hidden) {
-    items.push({
-      el: composer,
-      desired: relativeTop(anchorViewportTop(pendingSelection?.threadId), innerTop),
-      active: true,
-    });
-  }
-  for (const card of threadsEl.querySelectorAll(".thread-card[data-thread-id]")) {
-    const id = card.getAttribute("data-thread-id");
-    items.push({
-      el: card,
-      desired: relativeTop(anchorViewportTop(id), innerTop),
-      active: composer.hidden && id === activeThreadId,
-    });
-  }
-  if (items.length === 0) {
-    commentRailInner.style.height = "";
-    return;
-  }
-
-  for (const item of items) item.height = item.el.offsetHeight;
-
-  // Anchored cards lay out by position; unanchored ones (anchor text changed)
-  // just pile up after them.
-  const anchored = items.filter((i) => i.desired != null).sort((a, b) => a.desired - b.desired);
-  const unanchored = items.filter((i) => i.desired == null);
-
-  let cursor = 0;
-  for (const item of anchored) {
-    item.top = Math.max(item.desired, cursor);
-    cursor = item.top + item.height + RAIL_GAP;
-  }
-
-  const activeIdx = anchored.findIndex((i) => i.active);
-  if (activeIdx !== -1) {
-    anchored[activeIdx].top = Math.max(0, anchored[activeIdx].desired);
-    for (let i = activeIdx - 1; i >= 0; i -= 1) {
-      const ceil = anchored[i + 1].top - anchored[i].height - RAIL_GAP;
-      anchored[i].top = Math.min(anchored[i].top, ceil);
-    }
-    for (let i = activeIdx + 1; i < anchored.length; i += 1) {
-      const floor = anchored[i - 1].top + anchored[i - 1].height + RAIL_GAP;
-      anchored[i].top = Math.max(anchored[i].top, floor);
-    }
-  }
-
-  for (const item of unanchored) {
-    item.top = cursor;
-    cursor = item.top + item.height + RAIL_GAP;
-  }
-
-  for (const item of [...anchored, ...unanchored]) {
-    const top = Math.max(0, item.top);
-    item.el.style.top = `${top}px`;
-  }
   commentRailInner.style.height = "";
+  composer.style.top = "";
+  for (const card of threadsEl.querySelectorAll(".thread-card")) {
+    card.style.top = "";
+  }
 }
 
-function relativeTop(viewportTop, innerTop) {
-  return viewportTop == null ? null : viewportTop - innerTop;
+function syncRailToFrameViewport({ force = false, behavior = "auto" } = {}) {
+  if (appShell.dataset.rail !== "open") return;
+  if (composer.hidden === false) return;
+  if (railAutoFollowPaused && !force) return;
+  if (commentRail.contains(document.activeElement) && isFormControl(document.activeElement)) return;
+
+  const threadId = threadIdForFrameViewport();
+  if (!threadId) return;
+
+  if (threadId !== activeThreadId) {
+    activateThreadWithoutRender(threadId);
+  }
+  layoutRail();
+  revealThreadCardInRailSoon(threadId, { behavior });
+}
+
+function threadIdForFrameViewport() {
+  const doc = frame.contentDocument;
+  const win = frame.contentWindow;
+  if (!doc?.body || !win) return null;
+
+  const viewportHeight = win.innerHeight || doc.documentElement.clientHeight || 0;
+  const metrics = sortedThreads()
+    .map((thread, index) => {
+      const metric = anchorViewportMetric(thread.id, doc);
+      return metric ? { ...metric, id: thread.id, index } : null;
+    })
+    .filter(Boolean);
+
+  if (metrics.length === 0) return null;
+
+  const visible = metrics
+    .filter((metric) => metric.bottom >= 0 && metric.top <= viewportHeight)
+    .sort((left, right) => {
+      return Math.max(0, left.top) - Math.max(0, right.top) || left.index - right.index;
+    });
+  if (visible[0]) return visible[0].id;
+
+  const below = metrics
+    .filter((metric) => metric.top >= 0)
+    .sort((left, right) => left.top - right.top || left.index - right.index);
+  if (below[0]) return below[0].id;
+
+  const above = metrics
+    .filter((metric) => metric.bottom < 0)
+    .sort((left, right) => right.bottom - left.bottom || right.index - left.index);
+  return above[0]?.id ?? null;
+}
+
+function anchorViewportMetric(threadId, doc) {
+  const escapedThreadId = cssEscape(threadId);
+  const anchors = doc.querySelectorAll(
+    `.redline-highlight[data-thread-id="${escapedThreadId}"], .coauthor-highlight[data-thread-id="${escapedThreadId}"]`,
+  );
+  let top = Infinity;
+  let bottom = -Infinity;
+
+  for (const anchor of anchors) {
+    for (const rect of anchor.getClientRects()) {
+      if (rect.width === 0 && rect.height === 0) continue;
+      top = Math.min(top, rect.top);
+      bottom = Math.max(bottom, rect.bottom);
+    }
+  }
+
+  if (top === Infinity) return null;
+  return { top, bottom };
+}
+
+function revealThreadCardInRail(threadId, { behavior = "auto" } = {}) {
+  if (appShell.dataset.rail !== "open") return;
+
+  const card = threadsEl.querySelector(`.thread-card[data-thread-id="${cssEscape(threadId)}"]`);
+  if (!(card instanceof HTMLElement)) return;
+
+  const railHeight = commentRail.clientHeight;
+  const cardTop = card.offsetTop;
+  const cardBottom = cardTop + card.offsetHeight;
+  const currentTop = commentRail.scrollTop;
+  const currentBottom = currentTop + railHeight;
+  let nextTop = currentTop;
+
+  if (cardTop - RAIL_EDGE_PADDING < currentTop) {
+    nextTop = cardTop - RAIL_EDGE_PADDING;
+  } else if (cardBottom + RAIL_EDGE_PADDING > currentBottom) {
+    nextTop = cardBottom + RAIL_EDGE_PADDING - railHeight;
+  }
+
+  const maxTop = Math.max(0, commentRail.scrollHeight - railHeight);
+  nextTop = Math.max(0, Math.min(maxTop, nextTop));
+  if (Math.abs(nextTop - currentTop) < 1) return;
+
+  railProgrammaticScrollDepth += 1;
+  commentRail.scrollTo({ top: nextTop, behavior });
+  window.setTimeout(() => {
+    railProgrammaticScrollDepth = Math.max(0, railProgrammaticScrollDepth - 1);
+  }, behavior === "smooth" ? 600 : 80);
+}
+
+function revealThreadCardInRailSoon(threadId, options = {}) {
+  revealThreadCardInRail(threadId, options);
+  if (railRevealFrame != null) {
+    cancelAnimationFrame(railRevealFrame);
+  }
+  clearTimeout(railRevealTimer);
+  railRevealFrame = requestAnimationFrame(() => {
+    railRevealFrame = null;
+    revealThreadCardInRail(threadId, options);
+  });
+  railRevealTimer = setTimeout(() => {
+    revealThreadCardInRail(threadId, options);
+  }, 140);
 }
 
 function closeComposer({ discardDraft = false } = {}) {
@@ -1132,12 +1173,16 @@ function getAuthorName() {
   return authorNameInput.value.trim() || "User";
 }
 
-function renderThreads() {
-  const threads = [...(state?.threads ?? [])].sort((left, right) => {
+function sortedThreads() {
+  return [...(state?.threads ?? [])].sort((left, right) => {
     const leftStart = left.anchor.textPosition?.start ?? Number.MAX_SAFE_INTEGER;
     const rightStart = right.anchor.textPosition?.start ?? Number.MAX_SAFE_INTEGER;
     return leftStart - rightStart || left.createdAt.localeCompare(right.createdAt);
   });
+}
+
+function renderThreads() {
+  const threads = sortedThreads();
 
   if (threads.length === 0) {
     // The rail only shows at all when there's a thread or an open composer, so
@@ -1324,10 +1369,10 @@ function deselectThread() {
 }
 
 function selectThread(threadId, keepFocus = false) {
+  railAutoFollowPaused = false;
   activateThreadWithoutRender(threadId);
-  // Re-place the notes so the now-active card springs to its anchor and the
-  // others move out of its way.
   layoutRail();
+  revealThreadCardInRailSoon(threadId, { behavior: "smooth" });
   if (!keepFocus) {
     scrollToThreadAnchor(threadId);
   }

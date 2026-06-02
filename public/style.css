@@ -538,15 +538,17 @@ button.open-icon:disabled {
 
 /* ---------- Comment rail ---------- */
 
-/* The rail is a live margin next to the iframe viewport. Cards are absolutely
-   positioned by JS (layoutRail) against visible anchor positions inside the
-   reviewed document. */
+/* The rail is an independently scrollable review list. JS keeps the active
+   card synced to the anchor nearest the reviewed document viewport. */
 .comment-rail {
   min-width: 0;
   min-height: 0;
   border-left: 1px solid var(--line);
   background: var(--paper);
-  overflow: visible;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 /* When collapsed, clip the fixed-width contents so the panel slides out
@@ -559,19 +561,14 @@ button.open-icon:disabled {
 
 .comment-rail-inner {
   position: relative;
-  height: 100%;
+  min-height: 100%;
   width: 360px;
   max-width: 100%;
+  padding: 16px;
 }
 
-/* Composer and cards are pulled out of flow and dropped next to their anchor.
-   left/right inset them inside the rail; `top` comes from JS. */
 .composer,
 .thread-card {
-  position: absolute;
-  left: 16px;
-  right: 16px;
-  top: 16px;
   border: 1px solid var(--line);
   border-radius: 13px;
   background: var(--panel-raised);
@@ -580,6 +577,7 @@ button.open-icon:disabled {
 .composer {
   z-index: 40;
   padding: 12px;
+  margin-bottom: 14px;
   box-shadow: var(--shadow-float);
   animation: fade-up 0.2s cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
@@ -622,13 +620,13 @@ textarea:focus {
 }
 
 .threads {
-  display: contents;
+  display: grid;
+  gap: 12px;
 }
 
 .thread-card {
   padding: 13px 14px;
-  transition: top 200ms cubic-bezier(0.2, 0.8, 0.2, 1), border-color 160ms ease,
-    box-shadow 160ms ease;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
 }
 
 .thread-card.unanchored {
@@ -859,27 +857,9 @@ textarea:focus {
     overflow: visible;
   }
 
-  /* No side column to align to — drop the margin notes back into normal flow,
-     stacked top to bottom. (layoutRail clears the inline `top`/`height` here.) */
   .comment-rail-inner {
     height: auto;
     width: auto;
     padding: 16px;
-  }
-
-  .threads {
-    display: grid;
-    gap: 12px;
-  }
-
-  .composer,
-  .thread-card {
-    position: static;
-    left: auto;
-    right: auto;
-  }
-
-  .composer {
-    margin-bottom: 14px;
   }
 }
