@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -32,6 +33,10 @@ const eventClients = new Set<ReadableStreamDefaultController<Uint8Array>>();
 const server = Bun.serve({
   hostname: options.host,
   port: options.port,
+  // The /api/events SSE stream is long-lived and only sends data when the
+  // document changes. Bun's default 10s idleTimeout would drop it (and log a
+  // warning) on every quiet stretch; a heartbeat keeps it under this ceiling.
+  idleTimeout: 120,
   async fetch(request) {
     try {
       return await handleRequest(request);
@@ -63,6 +68,25 @@ async function handleRequest(request: Request): Promise<Response> {
 
   if (url.pathname === "/api/state" || url.pathname === "/api/agent/state") {
     return json(readDocumentState(options.documentPath));
+  }
+
+  if (url.pathname === "/api/files") {
+    return json(listDirectory(url.searchParams.get("dir")));
+  }
+
+  if (url.pathname === "/api/open" && request.method === "POST") {
+    const body = await readJson<{ path?: unknown }>(request);
+    if (typeof body.path !== "string" || !body.path.trim()) {
+      return json({ error: "A file path is required." }, 400);
+    }
+    const target = expandPath(body.path);
+    if (!fs.existsSync(target) || !fs.statSync(target).isFile()) {
+      return json({ error: `Not a file: ${target}` }, 404);
+    }
+    options.documentPath = target;
+    writeServerState(server.url.toString(), options.documentPath);
+    console.log(`Redline switched to ${options.documentPath}`);
+    return changed(readDocumentState(options.documentPath), "document.opened");
   }
 
   if (url.pathname === "/api/document" && request.method === "PUT") {
@@ -174,13 +198,25 @@ function broadcast(reason: string, state = readDocumentState(options.documentPat
 
 function eventStream(): Response {
   let streamController: ReadableStreamDefaultController<Uint8Array> | null = null;
+  let heartbeat: ReturnType<typeof setInterval> | undefined;
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       streamController = controller;
       eventClients.add(controller);
       controller.enqueue(textEncoder.encode("event: connected\ndata: {}\n\n"));
+      // Comment line every 25s keeps the connection active so it never trips
+      // the idleTimeout during quiet periods.
+      heartbeat = setInterval(() => {
+        try {
+          controller.enqueue(textEncoder.encode(": keepalive\n\n"));
+        } catch {
+          clearInterval(heartbeat);
+        }
+      }, 25_000);
+      heartbeat.unref?.();
     },
     cancel() {
+      clearInterval(heartbeat);
       if (streamController) {
         eventClients.delete(streamController);
       }
@@ -230,6 +266,56 @@ function serveDocumentAsset(urlPath: string): Response {
       "Cache-Control": "no-store",
     },
   });
+}
+
+function expandPath(input: string): string {
+  let value = input.trim();
+  if (value === "~") {
+    value = os.homedir();
+  } else if (value.startsWith("~/")) {
+    value = path.join(os.homedir(), value.slice(2));
+  }
+  return path.resolve(process.cwd(), value);
+}
+
+interface DirectoryListing {
+  dir: string;
+  parent: string | null;
+  current: string;
+  dirs: { name: string; path: string }[];
+  files: { name: string; path: string; active: boolean }[];
+  error?: string;
+}
+
+function listDirectory(requested: string | null): DirectoryListing {
+  const dir = requested ? expandPath(requested) : path.dirname(options.documentPath);
+  const parent = path.dirname(dir);
+  const base: DirectoryListing = {
+    dir,
+    parent: parent === dir ? null : parent,
+    current: options.documentPath,
+    dirs: [],
+    files: [],
+  };
+
+  try {
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    base.dirs = entries
+      .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
+      .map((entry) => ({ name: entry.name, path: path.join(dir, entry.name) }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    base.files = entries
+      .filter((entry) => entry.isFile() && /\.html?$/i.test(entry.name))
+      .map((entry) => {
+        const filePath = path.join(dir, entry.name);
+        return { name: entry.name, path: filePath, active: filePath === options.documentPath };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
+  } catch {
+    base.error = `Cannot read directory: ${dir}`;
+  }
+
+  return base;
 }
 
 function json(value: unknown, status = 200): Response {

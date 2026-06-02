@@ -364,7 +364,7 @@ function extractEmbeddedReviewState(html: string): EmbeddedCommentState | null {
 function writeHtmlWithReviewState(
   documentPath: string,
   html: string,
-  reviewState: EmbeddedCommentState,
+  reviewState: Omit<EmbeddedCommentState, "schemaVersion">,
 ): void {
   const absoluteDocumentPath = path.resolve(documentPath);
   const normalized: EmbeddedCommentState = {

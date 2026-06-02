@@ -16,9 +16,21 @@ const notice = document.querySelector("#notice");
 const noticeTitle = document.querySelector("#noticeTitle");
 const noticeBody = document.querySelector("#noticeBody");
 const noticeAction = document.querySelector("#noticeAction");
+const appShell = document.querySelector(".app-shell");
+const railToggle = document.querySelector("#railToggle");
+const railToggleCount = document.querySelector("#railToggleCount");
+const railCloseButton = document.querySelector("#railCloseButton");
+const openButton = document.querySelector("#openButton");
+const openPanel = document.querySelector("#openPanel");
+const openPanelDir = document.querySelector("#openPanelDir");
+const openList = document.querySelector("#openList");
+const openPathForm = document.querySelector("#openPathForm");
+const openPathInput = document.querySelector("#openPathInput");
+const selectionFab = document.querySelector("#selectionFab");
 
 let state = null;
 let editMode = false;
+let railCollapsed = localStorage.getItem("redline.railCollapsed") === "1";
 let dirty = false;
 let saving = false;
 let pendingSelection = null;
@@ -28,6 +40,8 @@ let blockedRemoteUpdate = false;
 let activeEditableElement = null;
 let anchorStatusReady = false;
 let anchoredThreadIds = new Set();
+let frameResizeObserver = null;
+let fabTimer = null;
 
 authorNameInput.value = getStoredAuthorName();
 
@@ -49,6 +63,39 @@ editButton.addEventListener("click", () => {
 });
 
 commentButton.addEventListener("click", beginCommentFromSelection);
+
+railToggle.addEventListener("click", () => setRailCollapsed(!railCollapsed));
+railCloseButton.addEventListener("click", () => setRailCollapsed(true));
+
+openButton.addEventListener("click", () => {
+  if (openPanel.hidden) void showOpenPanel();
+  else closeOpenPanel();
+});
+openList.addEventListener("click", (event) => {
+  const row = event.target instanceof HTMLElement ? event.target.closest("[data-path]") : null;
+  if (!(row instanceof HTMLElement)) return;
+  const targetPath = row.getAttribute("data-path");
+  if (!targetPath) return;
+  if (row.dataset.kind === "dir") void browseDirectory(targetPath);
+  else void openDocument(targetPath);
+});
+openPathForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const value = openPathInput.value.trim();
+  if (value) void openDocument(value);
+});
+document.addEventListener("click", (event) => {
+  if (openPanel.hidden) return;
+  const target = event.target;
+  if (target instanceof Node && (openPanel.contains(target) || openButton.contains(target))) return;
+  closeOpenPanel();
+});
+selectionFab.addEventListener("mousedown", (event) => event.preventDefault());
+selectionFab.addEventListener("click", () => {
+  beginCommentFromSelection();
+});
+window.addEventListener("scroll", repositionSelectionFab, true);
+window.addEventListener("resize", repositionSelectionFab);
 
 cancelCommentButton.addEventListener("click", () => closeComposer({ discardDraft: true }));
 commentBody.addEventListener("keydown", submitFormOnCommandEnter);
@@ -163,6 +210,7 @@ threadsEl.addEventListener("submit", async (event) => {
 });
 
 window.addEventListener("keydown", handleGlobalShortcut);
+window.addEventListener("resize", resizeFrameToContent);
 
 function handleGlobalShortcut(event) {
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
@@ -267,13 +315,198 @@ function render() {
   renderFrame();
   renderThreads();
   updateToolbar();
+  updateRail();
+}
+
+function setRailCollapsed(collapsed) {
+  railCollapsed = collapsed;
+  localStorage.setItem("redline.railCollapsed", collapsed ? "1" : "0");
+  updateRail();
+}
+
+// Decide whether the comment rail is shown, and in which mode:
+//   "empty"  — no threads and not composing → rail fully hidden, doc full width
+//   "closed" — threads exist but the user collapsed the rail
+//   "open"   — rail visible (always while composing)
+function updateRail() {
+  const threadCount = state?.threads?.length ?? 0;
+  const composerOpen = composer.hidden === false;
+  const mode = threadCount === 0 && !composerOpen
+    ? "empty"
+    : railCollapsed && !composerOpen
+      ? "closed"
+      : "open";
+
+  appShell.dataset.rail = mode;
+  railToggle.hidden = threadCount === 0;
+  railToggle.setAttribute("aria-pressed", mode === "open" ? "true" : "false");
+  railToggle.classList.toggle("active", mode === "open");
+  railToggleCount.textContent = String(threadCount);
+}
+
+// ---------- Open another file ----------
+
+async function showOpenPanel(dir) {
+  openPanel.hidden = false;
+  openButton.setAttribute("aria-expanded", "true");
+  openPathInput.value = "";
+  await browseDirectory(dir);
+}
+
+function closeOpenPanel() {
+  openPanel.hidden = true;
+  openButton.setAttribute("aria-expanded", "false");
+}
+
+async function browseDirectory(dir) {
+  openList.innerHTML = `<div class="open-empty">Loading…</div>`;
+  let listing;
+  try {
+    const query = dir ? `?dir=${encodeURIComponent(dir)}` : "";
+    const response = await fetch(`/api/files${query}`);
+    listing = await response.json();
+  } catch {
+    openList.innerHTML = `<div class="open-empty">Could not read the folder.</div>`;
+    return;
+  }
+  renderFileListing(listing);
+}
+
+function renderFileListing(listing) {
+  openPanelDir.textContent = listing.dir ?? "";
+  if (!openPathInput.value) {
+    openPathInput.value = listing.dir ? `${listing.dir}/` : "";
+  }
+
+  const rows = [];
+  if (listing.parent) {
+    rows.push(fileRow({ path: listing.parent, name: "..", kind: "dir", label: "Parent folder" }));
+  }
+  for (const entry of listing.dirs ?? []) {
+    rows.push(fileRow({ path: entry.path, name: entry.name, kind: "dir" }));
+  }
+  for (const entry of listing.files ?? []) {
+    rows.push(fileRow({ path: entry.path, name: entry.name, kind: "file", active: entry.active }));
+  }
+
+  if (rows.length === 0) {
+    openList.innerHTML = `<div class="open-empty">${
+      listing.error ? escapeHtml(listing.error) : "No HTML files or folders here."
+    }</div>`;
+    return;
+  }
+  openList.innerHTML = rows.join("");
+}
+
+function fileRow({ path, name, kind, active = false, label }) {
+  const icon =
+    kind === "dir"
+      ? `<svg class="row-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3.5 6.5A1.5 1.5 0 0 1 5 5h4l2 2.5h6A1.5 1.5 0 0 1 18.5 9v8a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 17z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>`
+      : `<svg class="row-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 3.5h7L18.5 8v12a1 1 0 0 1-1 1h-10a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M13.5 3.5V8.5H18.5" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>`;
+  return `
+    <button type="button" class="open-row ${kind === "dir" ? "is-dir" : ""} ${active ? "active" : ""}"
+      data-path="${escapeHtml(path)}" data-kind="${kind}" title="${escapeHtml(label ?? path)}">
+      ${icon}
+      <span class="row-name">${escapeHtml(name)}</span>
+      ${active ? `<span class="row-tag">Open</span>` : ""}
+    </button>`;
+}
+
+async function openDocument(targetPath) {
+  if (dirty && !saving) {
+    await saveNow();
+  }
+  let response;
+  try {
+    response = await fetch("/api/open", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: targetPath }),
+    });
+  } catch {
+    showNotice("Open failed", "Redline could not reach the local server.");
+    return;
+  }
+  if (!response.ok) {
+    const payload = await readJsonPayload(response);
+    showNotice("Open failed", payload.error || "That file could not be opened.");
+    return;
+  }
+  state = await response.json();
+  activeThreadId = null;
+  pendingSelection = null;
+  dirty = false;
+  blockedRemoteUpdate = false;
+  closeOpenPanel();
+  hideNotice();
+  hideSelectionFab();
+  render();
+}
+
+// ---------- Floating selection comment button ----------
+
+function repositionSelectionFab() {
+  if (selectionFab.hidden) return;
+  positionSelectionFab();
+}
+
+// Wait until the selection settles before showing the button, so it doesn't
+// track the caret while you're still dragging. Each selection change resets the
+// timer and hides the button; it reappears once changes stop.
+function scheduleSelectionFab() {
+  hideSelectionFab();
+  fabTimer = setTimeout(positionSelectionFab, 180);
+}
+
+function positionSelectionFab() {
+  if (!pendingSelection?.range || composer.hidden === false) {
+    hideSelectionFab();
+    return;
+  }
+  const rects = pendingSelection.range.getClientRects();
+  const rect = rects[rects.length - 1];
+  if (!rect || (rect.width === 0 && rect.height === 0)) {
+    hideSelectionFab();
+    return;
+  }
+  const frameRect = frame.getBoundingClientRect();
+  const x = Math.min(frameRect.left + rect.right + 10, window.innerWidth - 22);
+  const y = Math.min(
+    Math.max(frameRect.top + (rect.top + rect.bottom) / 2, 64),
+    window.innerHeight - 20,
+  );
+  selectionFab.style.left = `${x}px`;
+  selectionFab.style.top = `${y}px`;
+  selectionFab.hidden = false;
+}
+
+function hideSelectionFab() {
+  clearTimeout(fabTimer);
+  selectionFab.hidden = true;
 }
 
 function renderFrame() {
   anchorStatusReady = false;
   anchoredThreadIds = new Set();
+  frameResizeObserver?.disconnect();
+  frameResizeObserver = null;
   frame.addEventListener("load", setupFrame, { once: true });
   frame.srcdoc = prepareHtmlForFrame(state.html);
+}
+
+// Grow the iframe to fit its content so the whole page scrolls, instead of the
+// document scrolling inside a viewport-height frame.
+function resizeFrameToContent() {
+  const doc = frame.contentDocument;
+  if (!doc?.documentElement) return;
+  const height = Math.max(
+    doc.documentElement.scrollHeight,
+    doc.body?.scrollHeight ?? 0,
+    doc.body?.offsetHeight ?? 0,
+  );
+  if (height > 0 && Math.abs(parseFloat(frame.style.height || "0") - height) > 1) {
+    frame.style.height = `${height}px`;
+  }
 }
 
 function setupFrame() {
@@ -296,6 +529,10 @@ function setupFrame() {
   anchorStatusReady = true;
   renderThreads();
   syncHighlightSelection();
+
+  resizeFrameToContent();
+  frameResizeObserver = new ResizeObserver(() => resizeFrameToContent());
+  frameResizeObserver.observe(doc.body);
 }
 
 function prepareHtmlForFrame(html) {
@@ -316,13 +553,19 @@ function prepareHtmlForFrame(html) {
   style.id = "redline-runtime-style";
   style.textContent = `
     .redline-highlight {
-      background: rgba(252, 211, 77, 0.55);
-      border-bottom: 2px solid rgba(217, 119, 6, 0.8);
+      background: rgba(196, 54, 29, 0.12);
+      border-bottom: 2px solid rgba(196, 54, 29, 0.5);
+      border-radius: 2px;
       cursor: pointer;
+      transition: background-color 140ms ease, border-color 140ms ease;
+    }
+    .redline-highlight:hover {
+      background: rgba(196, 54, 29, 0.18);
     }
     .redline-highlight.redline-active {
-      background: rgba(45, 212, 191, 0.35);
-      border-bottom-color: rgba(13, 148, 136, 0.9);
+      background: rgba(196, 54, 29, 0.24);
+      border-bottom: 2px solid rgba(160, 39, 18, 0.95);
+      box-shadow: 0 0 0 2px rgba(196, 54, 29, 0.16);
     }
     body.redline-edit-mode .redline-editable-text {
       cursor: text;
@@ -333,11 +576,11 @@ function prepareHtmlForFrame(html) {
       transition: background-color 120ms ease, outline-color 120ms ease, box-shadow 120ms ease;
     }
     body.redline-edit-mode .redline-editable-text:hover {
-      outline-color: rgba(20, 184, 166, 0.28);
+      outline-color: rgba(196, 54, 29, 0.28);
     }
     body.redline-edit-mode .redline-editable-text:focus {
-      outline: 2px solid rgba(20, 184, 166, 0.58);
-      box-shadow: 0 0 0 5px rgba(20, 184, 166, 0.08);
+      outline: 2px solid rgba(196, 54, 29, 0.55);
+      box-shadow: 0 0 0 5px rgba(196, 54, 29, 0.08);
     }
   `;
   parsed.head.append(style);
@@ -607,6 +850,7 @@ function updateSelection() {
   const selection = win.getSelection();
   if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
     pendingSelection = null;
+    hideSelectionFab();
     updateToolbar();
     return;
   }
@@ -614,6 +858,7 @@ function updateSelection() {
   const range = selection.getRangeAt(0);
   if (!rangeIntersectsRoot(range, doc.body)) {
     pendingSelection = null;
+    hideSelectionFab();
     updateToolbar();
     return;
   }
@@ -621,6 +866,7 @@ function updateSelection() {
   const quote = selection.toString().replace(/\s+/g, " ").trim();
   if (!quote) {
     pendingSelection = null;
+    hideSelectionFab();
     updateToolbar();
     return;
   }
@@ -644,6 +890,7 @@ function updateSelection() {
     },
   };
   updateToolbar();
+  scheduleSelectionFab();
 }
 
 function rangeIntersectsRoot(range, root) {
@@ -669,6 +916,9 @@ function openComposer() {
   selectedQuoteEl.textContent = pendingSelection.quote;
   commentBody.value = "";
   composer.hidden = false;
+  hideSelectionFab();
+  // Commenting implies you want the rail; reopen it and keep it open afterward.
+  setRailCollapsed(false);
   commentBody.focus();
 }
 
@@ -680,6 +930,7 @@ function closeComposer({ discardDraft = false } = {}) {
   composer.hidden = true;
   commentBody.value = "";
   updateToolbar();
+  updateRail();
 }
 
 function ensurePendingInlineAnchor() {
@@ -747,7 +998,11 @@ function renderThreads() {
   threadCountEl.textContent = `${threads.length} ${threads.length === 1 ? "thread" : "threads"}`;
 
   if (threads.length === 0) {
-    threadsEl.innerHTML = `<div class="empty-state">No open comments.</div>`;
+    // While composing the first comment the composer already explains the
+    // context, so the empty-state would just be noise.
+    threadsEl.innerHTML = composer.hidden
+      ? `<div class="empty-state">No open comments.</div>`
+      : "";
     return;
   }
 
@@ -785,10 +1040,21 @@ function renderThreads() {
           }
           ${messages}
           <form class="reply-form" data-reply-form="${escapeHtml(thread.id)}">
-            <textarea rows="2" placeholder="Reply"></textarea>
+            <textarea rows="2" placeholder="Reply&#8230;"></textarea>
             <div class="thread-actions">
-              <button type="submit" class="ghost-button">Reply</button>
-              <button type="button" class="ghost-button" data-resolve-thread="${escapeHtml(thread.id)}">Resolve</button>
+              <button type="submit" class="ghost-button">
+                <svg class="btn-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M9.5 7 5 11.5 9.5 16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M5 11.5h8.5a5 5 0 0 1 5 5V18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <span class="btn-label">Reply</span>
+              </button>
+              <button type="button" class="ghost-button" data-resolve-thread="${escapeHtml(thread.id)}">
+                <svg class="btn-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M5 12.5 10 17.5 19 6.5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <span class="btn-label">Resolve</span>
+              </button>
             </div>
           </form>
         </article>
@@ -1001,9 +1267,14 @@ function scrollToThreadAnchor(threadId) {
 }
 
 function updateToolbar() {
-  editButton.textContent = editMode ? "Editing" : "Edit";
+  editButton.querySelector(".btn-label").textContent = editMode ? "Editing" : "Edit";
   editButton.classList.toggle("active", editMode);
   commentButton.disabled = !pendingSelection;
+
+  // The save indicator is only meaningful for document edits: show it while
+  // editing, mid-save, with unsaved changes, or on a conflict. When you're just
+  // reading, hide it so it doesn't read as a status of the author field.
+  saveStatusEl.hidden = !(editMode || dirty || saving || blockedRemoteUpdate);
 
   if (saving) {
     saveStatusEl.textContent = "Saving";
