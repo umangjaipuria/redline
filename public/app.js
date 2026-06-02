@@ -21,11 +21,6 @@ const railToggle = document.querySelector("#railToggle");
 const railToggleCount = document.querySelector("#railToggleCount");
 const railCloseButton = document.querySelector("#railCloseButton");
 const openButton = document.querySelector("#openButton");
-const openPanel = document.querySelector("#openPanel");
-const openPanelDir = document.querySelector("#openPanelDir");
-const openList = document.querySelector("#openList");
-const openPathForm = document.querySelector("#openPathForm");
-const openPathInput = document.querySelector("#openPathInput");
 const selectionFab = document.querySelector("#selectionFab");
 
 let state = null;
@@ -67,29 +62,7 @@ commentButton.addEventListener("click", beginCommentFromSelection);
 railToggle.addEventListener("click", () => setRailCollapsed(!railCollapsed));
 railCloseButton.addEventListener("click", () => setRailCollapsed(true));
 
-openButton.addEventListener("click", () => {
-  if (openPanel.hidden) void showOpenPanel();
-  else closeOpenPanel();
-});
-openList.addEventListener("click", (event) => {
-  const row = event.target instanceof HTMLElement ? event.target.closest("[data-path]") : null;
-  if (!(row instanceof HTMLElement)) return;
-  const targetPath = row.getAttribute("data-path");
-  if (!targetPath) return;
-  if (row.dataset.kind === "dir") void browseDirectory(targetPath);
-  else void openDocument(targetPath);
-});
-openPathForm.addEventListener("submit", (event) => {
-  event.preventDefault();
-  const value = openPathInput.value.trim();
-  if (value) void openDocument(value);
-});
-document.addEventListener("click", (event) => {
-  if (openPanel.hidden) return;
-  const target = event.target;
-  if (target instanceof Node && (openPanel.contains(target) || openButton.contains(target))) return;
-  closeOpenPanel();
-});
+openButton.addEventListener("click", () => void openViaDialog());
 selectionFab.addEventListener("mousedown", (event) => event.preventDefault());
 selectionFab.addEventListener("click", () => {
   beginCommentFromSelection();
@@ -344,100 +317,45 @@ function updateRail() {
   railToggleCount.textContent = String(threadCount);
 }
 
-// ---------- Open another file ----------
+// ---------- Open another file (native OS picker) ----------
 
-async function showOpenPanel(dir) {
-  openPanel.hidden = false;
-  openButton.setAttribute("aria-expanded", "true");
-  openPathInput.value = "";
-  await browseDirectory(dir);
-}
-
-function closeOpenPanel() {
-  openPanel.hidden = true;
-  openButton.setAttribute("aria-expanded", "false");
-}
-
-async function browseDirectory(dir) {
-  openList.innerHTML = `<div class="open-empty">Loading…</div>`;
-  let listing;
-  try {
-    const query = dir ? `?dir=${encodeURIComponent(dir)}` : "";
-    const response = await fetch(`/api/files${query}`);
-    listing = await response.json();
-  } catch {
-    openList.innerHTML = `<div class="open-empty">Could not read the folder.</div>`;
-    return;
-  }
-  renderFileListing(listing);
-}
-
-function renderFileListing(listing) {
-  openPanelDir.textContent = listing.dir ?? "";
-  if (!openPathInput.value) {
-    openPathInput.value = listing.dir ? `${listing.dir}/` : "";
-  }
-
-  const rows = [];
-  if (listing.parent) {
-    rows.push(fileRow({ path: listing.parent, name: "..", kind: "dir", label: "Parent folder" }));
-  }
-  for (const entry of listing.dirs ?? []) {
-    rows.push(fileRow({ path: entry.path, name: entry.name, kind: "dir" }));
-  }
-  for (const entry of listing.files ?? []) {
-    rows.push(fileRow({ path: entry.path, name: entry.name, kind: "file", active: entry.active }));
-  }
-
-  if (rows.length === 0) {
-    openList.innerHTML = `<div class="open-empty">${
-      listing.error ? escapeHtml(listing.error) : "No HTML files or folders here."
-    }</div>`;
-    return;
-  }
-  openList.innerHTML = rows.join("");
-}
-
-function fileRow({ path, name, kind, active = false, label }) {
-  const icon =
-    kind === "dir"
-      ? `<svg class="row-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3.5 6.5A1.5 1.5 0 0 1 5 5h4l2 2.5h6A1.5 1.5 0 0 1 18.5 9v8a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 17z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>`
-      : `<svg class="row-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 3.5h7L18.5 8v12a1 1 0 0 1-1 1h-10a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M13.5 3.5V8.5H18.5" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>`;
-  return `
-    <button type="button" class="open-row ${kind === "dir" ? "is-dir" : ""} ${active ? "active" : ""}"
-      data-path="${escapeHtml(path)}" data-kind="${kind}" title="${escapeHtml(label ?? path)}">
-      ${icon}
-      <span class="row-name">${escapeHtml(name)}</span>
-      ${active ? `<span class="row-tag">Open</span>` : ""}
-    </button>`;
-}
-
-async function openDocument(targetPath) {
-  if (dirty && !saving) {
+async function openViaDialog() {
+  // Don't switch documents while a save is racing or unsaved edits would be
+  // lost — flush first and bail if the document still isn't clean.
+  if (saving) return;
+  if (dirty) {
     await saveNow();
   }
+  if (dirty || blockedRemoteUpdate) {
+    showNotice(
+      "Unsaved changes",
+      "Save or reload this document before opening another file.",
+    );
+    return;
+  }
+  openButton.disabled = true;
   let response;
   try {
-    response = await fetch("/api/open", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: targetPath }),
-    });
+    response = await fetch("/api/open-dialog", { method: "POST" });
   } catch {
     showNotice("Open failed", "Redline could not reach the local server.");
     return;
+  } finally {
+    openButton.disabled = false;
   }
   if (!response.ok) {
     const payload = await readJsonPayload(response);
     showNotice("Open failed", payload.error || "That file could not be opened.");
     return;
   }
-  state = await response.json();
+  const data = await response.json();
+  if (data.cancelled) return;
+
+  state = data;
   activeThreadId = null;
   pendingSelection = null;
   dirty = false;
   blockedRemoteUpdate = false;
-  closeOpenPanel();
   hideNotice();
   hideSelectionFab();
   render();
@@ -490,6 +408,13 @@ function renderFrame() {
   anchoredThreadIds = new Set();
   frameResizeObserver?.disconnect();
   frameResizeObserver = null;
+  // Replacing the document invalidates any pending selection (its Range points
+  // into the old document) and any queued selection-fab timer.
+  pendingSelection = null;
+  hideSelectionFab();
+  // Drop any prior not-yet-fired load handler so a burst of renders can't run
+  // setupFrame twice on one document (duplicate listeners / observers).
+  frame.removeEventListener("load", setupFrame);
   frame.addEventListener("load", setupFrame, { once: true });
   frame.srcdoc = prepareHtmlForFrame(state.html);
 }

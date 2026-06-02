@@ -22,32 +22,14 @@
               <path d="M14.5 5H19v4.5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
           </span>
-          <div class="document-meta">
-            <div class="app-name">Redline</div>
-            <button id="openButton" type="button" class="open-button" title="Open another file" aria-haspopup="true" aria-expanded="false">
-              <span id="documentPath" class="document-path"></span>
-              <svg class="open-chevron" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <path d="M7 10l5 5 5-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-            </button>
-          </div>
-        </div>
-
-        <div id="openPanel" class="open-panel" hidden>
-          <div class="open-panel-head">
-            <span class="open-panel-title">Open document</span>
-            <span id="openPanelDir" class="open-panel-dir"></span>
-          </div>
-          <div id="openList" class="open-list"></div>
-          <form id="openPathForm" class="open-path-form">
-            <input id="openPathInput" type="text" spellcheck="false" placeholder="Type or paste a file path…">
-            <button type="submit" class="primary-button">
-              <svg class="btn-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <path d="M5 12h13M13 6l6 6-6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-              <span class="btn-label">Open</span>
-            </button>
-          </form>
+          <div class="app-name">Redline</div>
+          <span id="documentPath" class="document-path"></span>
+          <button id="openButton" type="button" class="icon-button open-icon" title="Open file…" aria-label="Open file">
+            <svg class="btn-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M4 8V6.2A1.7 1.7 0 0 1 5.7 4.5H9l2 2h6.3A1.7 1.7 0 0 1 19 8.2" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+              <path d="M3.2 9.5h17.2l-2.1 8.3a1 1 0 0 1-1 .7H6.3a1 1 0 0 1-1-.7z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+            </svg>
+          </button>
         </div>
         <div class="toolbar" aria-label="Document actions">
           <label class="author-control">
@@ -116,6 +98,12 @@
               <span class="btn-label">Reload</span>
             </button>
           </div>
+          <!--
+            Reviewed documents are trusted (you or your agent authored them); the
+            alternative is opening the HTML directly in a browser with no sandbox at
+            all. So we intentionally allow forms and popups. allow-scripts is
+            deliberately omitted — scripts stay disabled. Keep these flags.
+          -->
           <iframe
             id="documentFrame"
             class="document-frame"

@@ -58,6 +58,14 @@ console.log(`Agent state: ${new URL("/api/agent/state", server.url)}`);
 async function handleRequest(request: Request): Promise<Response> {
   const url = new URL(request.url);
 
+  // The API can read/write/switch files on disk. Block requests carrying a
+  // foreign Origin so a malicious web page (or a DNS-rebinding attack) can't
+  // drive these endpoints against your machine. Same-origin requests, the CLI,
+  // and curl send no foreign Origin and are unaffected.
+  if (url.pathname.startsWith("/api/") && !isLoopbackOrigin(request)) {
+    return json({ error: "Cross-origin requests are not allowed." }, 403);
+  }
+
   if (request.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders() });
   }
@@ -70,23 +78,26 @@ async function handleRequest(request: Request): Promise<Response> {
     return json(readDocumentState(options.documentPath));
   }
 
-  if (url.pathname === "/api/files") {
-    return json(listDirectory(url.searchParams.get("dir")));
-  }
-
   if (url.pathname === "/api/open" && request.method === "POST") {
     const body = await readJson<{ path?: unknown }>(request);
     if (typeof body.path !== "string" || !body.path.trim()) {
       return json({ error: "A file path is required." }, 400);
     }
-    const target = expandPath(body.path);
-    if (!fs.existsSync(target) || !fs.statSync(target).isFile()) {
-      return json({ error: `Not a file: ${target}` }, 404);
+    return openTarget(expandPath(body.path));
+  }
+
+  if (url.pathname === "/api/open-dialog" && request.method === "POST") {
+    let picked: string | null;
+    try {
+      picked = await pickFileWithNativeDialog(path.dirname(options.documentPath), request.signal);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "The file picker failed.";
+      return json({ error: message }, 500);
     }
-    options.documentPath = target;
-    writeServerState(server.url.toString(), options.documentPath);
-    console.log(`Redline switched to ${options.documentPath}`);
-    return changed(readDocumentState(options.documentPath), "document.opened");
+    if (picked === null) {
+      return json({ cancelled: true });
+    }
+    return openTarget(picked);
   }
 
   if (url.pathname === "/api/document" && request.method === "PUT") {
@@ -168,6 +179,22 @@ function changed(state: DocumentState, reason: string): Response {
   return json(state);
 }
 
+// Validate and switch the served document. Redline only renders HTML, so reject
+// anything that isn't an existing .html/.htm file (the picker filter is only a
+// hint — this is the actual guard).
+function openTarget(target: string): Response {
+  if (!fs.existsSync(target) || !fs.statSync(target).isFile()) {
+    return json({ error: `Not a file: ${target}` }, 404);
+  }
+  if (!/\.html?$/i.test(target)) {
+    return json({ error: "Redline can only open .html or .htm files." }, 415);
+  }
+  options.documentPath = target;
+  writeServerState(server.url.toString(), options.documentPath);
+  console.log(`Redline switched to ${options.documentPath}`);
+  return changed(readDocumentState(options.documentPath), "document.opened");
+}
+
 function pollForExternalChanges(): void {
   try {
     const state = readDocumentState(options.documentPath);
@@ -211,6 +238,7 @@ function eventStream(): Response {
           controller.enqueue(textEncoder.encode(": keepalive\n\n"));
         } catch {
           clearInterval(heartbeat);
+          eventClients.delete(controller);
         }
       }, 25_000);
       heartbeat.unref?.();
@@ -278,44 +306,65 @@ function expandPath(input: string): string {
   return path.resolve(process.cwd(), value);
 }
 
-interface DirectoryListing {
-  dir: string;
-  parent: string | null;
-  current: string;
-  dirs: { name: string; path: string }[];
-  files: { name: string; path: string; active: boolean }[];
-  error?: string;
-}
+// Only one native dialog at a time, so repeated requests can't stack Finder
+// windows and leave orphaned osascript processes.
+let dialogInFlight = false;
 
-function listDirectory(requested: string | null): DirectoryListing {
-  const dir = requested ? expandPath(requested) : path.dirname(options.documentPath);
-  const parent = path.dirname(dir);
-  const base: DirectoryListing = {
-    dir,
-    parent: parent === dir ? null : parent,
-    current: options.documentPath,
-    dirs: [],
-    files: [],
-  };
+// Open the OS-native file picker (macOS) so the user browses with Finder and we
+// still get the real absolute path the server needs. Returns null if cancelled.
+async function pickFileWithNativeDialog(
+  startDir: string,
+  signal?: AbortSignal,
+): Promise<string | null> {
+  if (process.platform !== "darwin") {
+    throw new Error(
+      "The native file picker is only available on macOS. Use POST /api/open with a path instead.",
+    );
+  }
+  if (dialogInFlight) {
+    throw new Error("A file dialog is already open.");
+  }
+  dialogInFlight = true;
+
+  const start = startDir && fs.existsSync(startDir) ? startDir : "";
+  const proc = Bun.spawn(
+    [
+      "osascript",
+      "-e", "on run argv",
+      "-e", "set startDir to item 1 of argv",
+      "-e", 'if startDir is not "" then',
+      "-e", 'set chosen to choose file of type {"public.html"} default location (POSIX file startDir) with prompt "Open a document in Redline"',
+      "-e", "else",
+      "-e", 'set chosen to choose file of type {"public.html"} with prompt "Open a document in Redline"',
+      "-e", "end if",
+      "-e", "POSIX path of chosen",
+      "-e", "end run",
+      start,
+    ],
+    { stdout: "pipe", stderr: "pipe" },
+  );
+
+  // If the browser request is abandoned (tab closed, navigation), kill the
+  // dialog instead of leaving osascript blocked on user input forever.
+  const onAbort = () => proc.kill();
+  signal?.addEventListener("abort", onAbort, { once: true });
 
   try {
-    const entries = fs.readdirSync(dir, { withFileTypes: true });
-    base.dirs = entries
-      .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
-      .map((entry) => ({ name: entry.name, path: path.join(dir, entry.name) }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-    base.files = entries
-      .filter((entry) => entry.isFile() && /\.html?$/i.test(entry.name))
-      .map((entry) => {
-        const filePath = path.join(dir, entry.name);
-        return { name: entry.name, path: filePath, active: filePath === options.documentPath };
-      })
-      .sort((a, b) => a.name.localeCompare(b.name));
-  } catch {
-    base.error = `Cannot read directory: ${dir}`;
+    const exitCode = await proc.exited;
+    if (exitCode !== 0) {
+      const stderr = (await new Response(proc.stderr).text()).trim();
+      // osascript reports a user cancel (or an abort kill) as error -128.
+      if (/-128/.test(stderr) || /User canceled/i.test(stderr) || signal?.aborted) {
+        return null;
+      }
+      throw new Error(stderr || "The file picker could not be opened.");
+    }
+    const stdout = (await new Response(proc.stdout).text()).trim();
+    return stdout || null;
+  } finally {
+    signal?.removeEventListener("abort", onAbort);
+    dialogInFlight = false;
   }
-
-  return base;
 }
 
 function json(value: unknown, status = 200): Response {
@@ -329,9 +378,24 @@ function json(value: unknown, status = 200): Response {
   });
 }
 
+// Allow the request only if it carries no Origin (CLI, curl, same-origin GET)
+// or a loopback Origin (the local SPA, possibly on another local port). Any
+// real remote site sends its own non-loopback Origin and is rejected.
+function isLoopbackOrigin(request: Request): boolean {
+  const origin = request.headers.get("origin");
+  if (!origin) return true;
+  try {
+    const host = new URL(origin).hostname;
+    return host === "127.0.0.1" || host === "localhost" || host === "::1";
+  } catch {
+    return false;
+  }
+}
+
 function corsHeaders(): Record<string, string> {
+  // No wildcard Access-Control-Allow-Origin: foreign origins are already
+  // rejected by isLoopbackOrigin, and the same-origin SPA needs no CORS.
   return {
-    "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Headers": "Content-Type",
     "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
   };

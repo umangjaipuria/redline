@@ -106,13 +106,6 @@ button:disabled {
   height: 15px;
 }
 
-.document-meta {
-  min-width: 0;
-  display: flex;
-  align-items: baseline;
-  gap: 11px;
-}
-
 .app-name {
   font-family: var(--font-display);
   font-optical-sizing: auto;
@@ -124,203 +117,34 @@ button:disabled {
   flex: none;
 }
 
-/* The file path doubles as the "open another file" trigger. */
-.open-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  min-width: 0;
-  max-width: min(42vw, 600px);
-  height: 26px;
-  padding: 0 7px;
-  border: 1px solid transparent;
-  border-radius: 7px;
-  background: none;
-  color: var(--ink-faint);
-  transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease;
-}
-
-.open-button:hover,
-.open-button[aria-expanded="true"] {
-  background: var(--panel);
-  border-color: var(--line-soft);
-  color: var(--ink-soft);
-}
-
-.open-chevron {
-  width: 13px;
-  height: 13px;
-  flex: none;
-  opacity: 0.7;
-}
-
 .document-path {
   min-width: 0;
-  max-width: 100%;
+  max-width: min(40vw, 560px);
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
   direction: rtl;
   text-align: left;
   unicode-bidi: plaintext;
+  color: var(--ink-faint);
   font-family: var(--font-mono);
   font-size: 11px;
   letter-spacing: -0.01em;
 }
 
-/* ---------- Open-file popover ---------- */
-
-.open-panel {
-  position: absolute;
-  top: 48px;
-  left: 50px;
-  z-index: 40;
-  width: 420px;
-  max-width: calc(100vw - 32px);
-  max-height: min(70vh, 540px);
-  display: flex;
-  flex-direction: column;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--panel-raised);
-  box-shadow: var(--shadow-float);
-  overflow: hidden;
-  animation: fade-up 0.18s cubic-bezier(0.2, 0.8, 0.2, 1) both;
-}
-
-.open-panel-head {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  padding: 12px 14px 8px;
-  border-bottom: 1px solid var(--line-soft);
-}
-
-.open-panel-title {
-  font-family: var(--font-display);
-  font-weight: 600;
-  font-size: 14px;
-  color: var(--ink);
+/* Icon-only "open file" button sitting next to the path: borderless and light,
+   highlighting only on hover. (button.* beats the later .icon-button rule.) */
+button.open-icon {
   flex: none;
-}
-
-.open-panel-dir {
-  min-width: 0;
-  flex: 1;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  direction: rtl;
-  text-align: left;
-  unicode-bidi: plaintext;
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--ink-faint);
-}
-
-.open-list {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 6px;
-}
-
-.open-row {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  width: 100%;
-  padding: 8px 9px;
+  width: 30px;
+  padding: 0;
   border: 0;
-  border-radius: 8px;
   background: none;
-  color: var(--ink);
-  text-align: left;
-  font-size: 13px;
-  font-weight: 500;
-}
-
-.open-row:hover {
-  background: var(--red-wash);
-  color: var(--red-deep);
-}
-
-.open-row .row-icon {
-  width: 17px;
-  height: 17px;
-  flex: none;
   color: var(--ink-faint);
 }
 
-.open-row:hover .row-icon {
-  color: var(--red);
-}
-
-.open-row.is-dir .row-icon {
-  color: var(--amber);
-}
-
-.open-row .row-name {
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  font-family: var(--font-mono);
-  font-size: 12px;
-}
-
-.open-row.active {
-  background: var(--red-wash);
-  color: var(--red-deep);
-  font-weight: 700;
-}
-
-.open-row .row-tag {
-  margin-left: auto;
-  flex: none;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--red);
-}
-
-.open-empty {
-  padding: 14px 12px;
-  color: var(--ink-faint);
-  font-size: 12.5px;
-  font-style: italic;
-}
-
-.open-path-form {
-  display: flex;
-  gap: 8px;
-  padding: 10px 12px;
-  border-top: 1px solid var(--line-soft);
-  background: var(--panel);
-}
-
-.open-path-form input {
-  flex: 1;
-  min-width: 0;
-  height: 34px;
-  padding: 0 11px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--panel-raised);
-  color: var(--ink);
-  font-family: var(--font-mono);
-  font-size: 12px;
-}
-
-.open-path-form input:focus {
-  outline: none;
-  border-color: var(--red-line);
-  box-shadow: 0 0 0 3px var(--red-wash);
-}
-
-.open-path-form .primary-button {
-  flex: none;
+button.open-icon:disabled {
+  opacity: 0.5;
 }
 
 /* ---------- Floating selection comment button ---------- */
