@@ -298,7 +298,10 @@ function serveDocumentAsset(runtime: ServerRuntime, urlPath: string): Response {
   const relativePath = decodeURIComponent(urlPath.replace(/^\/document-assets\/?/, ""));
   const documentDir = path.dirname(runtime.options.documentPath);
   const absolutePath = path.resolve(documentDir, relativePath);
-  if (!isInside(documentDir, absolutePath) || !fs.existsSync(absolutePath)) {
+  if (!relativePath || !isInside(documentDir, absolutePath) || !fs.existsSync(absolutePath)) {
+    return new Response("Not found", { status: 404 });
+  }
+  if (!fs.statSync(absolutePath).isFile()) {
     return new Response("Not found", { status: 404 });
   }
   return new Response(Bun.file(absolutePath), {

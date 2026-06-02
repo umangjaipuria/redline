@@ -34,12 +34,11 @@ let activeEditableElement = null;
 let anchorStatusReady = false;
 let anchoredThreadIds = new Set();
 let frameResizeObserver = null;
+let frameViewportCleanup = null;
 let fabTimer = null;
 
-// Spacing for the margin-note layout (see layoutRail): gap between stacked
-// cards and the inset that pads the rail's bottom.
+// Spacing between stacked margin-note cards (see layoutRail).
 const RAIL_GAP = 12;
-const RAIL_INSET = 16;
 
 authorNameInput.value = getStoredAuthorName();
 
@@ -228,7 +227,7 @@ threadsEl.addEventListener("submit", async (event) => {
 });
 
 window.addEventListener("keydown", handleGlobalShortcut);
-window.addEventListener("resize", resizeFrameToContent);
+window.addEventListener("resize", syncFrameViewport);
 
 function handleGlobalShortcut(event) {
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
@@ -454,8 +453,7 @@ function hideSelectionFab() {
 function renderFrame() {
   anchorStatusReady = false;
   anchoredThreadIds = new Set();
-  frameResizeObserver?.disconnect();
-  frameResizeObserver = null;
+  teardownFrameViewportTracking();
   // Replacing the document invalidates any pending selection (its Range points
   // into the old document) and any queued selection-fab timer.
   pendingSelection = null;
@@ -467,27 +465,22 @@ function renderFrame() {
   frame.srcdoc = prepareHtmlForFrame(state.html);
 }
 
-// Grow the iframe to fit its content so the whole page scrolls, instead of the
-// document scrolling inside a viewport-height frame.
-function resizeFrameToContent() {
-  const doc = frame.contentDocument;
-  if (!doc?.documentElement) return;
-  const height = Math.max(
-    doc.documentElement.scrollHeight,
-    doc.body?.scrollHeight ?? 0,
-    doc.body?.offsetHeight ?? 0,
-  );
-  if (height > 0 && Math.abs(parseFloat(frame.style.height || "0") - height) > 1) {
-    frame.style.height = `${height}px`;
-  }
-  // The document's height drives where every anchor sits, so re-place the
-  // margin notes whenever it reflows (fonts/images loading, window resize).
+function teardownFrameViewportTracking() {
+  frameViewportCleanup?.();
+  frameViewportCleanup = null;
+  frameResizeObserver?.disconnect();
+  frameResizeObserver = null;
+}
+
+function syncFrameViewport() {
   layoutRail();
+  repositionSelectionFab();
 }
 
 function setupFrame() {
   const doc = frame.contentDocument;
   if (!doc?.body) return;
+  const win = frame.contentWindow;
 
   syncEditMode();
   doc.addEventListener("selectionchange", updateSelection);
@@ -506,9 +499,26 @@ function setupFrame() {
   renderThreads();
   syncHighlightSelection();
 
-  resizeFrameToContent();
-  frameResizeObserver = new ResizeObserver(() => resizeFrameToContent());
+  let trackingActive = true;
+  const onViewportChange = () => {
+    if (trackingActive) syncFrameViewport();
+  };
+  win?.addEventListener("scroll", onViewportChange, { passive: true });
+  win?.addEventListener("resize", onViewportChange);
+  doc.addEventListener("scroll", onViewportChange, { capture: true, passive: true });
+  doc.fonts?.ready.then(onViewportChange).catch(() => {});
+  frameResizeObserver = new ResizeObserver(onViewportChange);
   frameResizeObserver.observe(doc.body);
+  frameResizeObserver.observe(doc.documentElement);
+  frameViewportCleanup = () => {
+    trackingActive = false;
+    win?.removeEventListener("scroll", onViewportChange);
+    win?.removeEventListener("resize", onViewportChange);
+    doc.removeEventListener("scroll", onViewportChange, { capture: true });
+    frameResizeObserver?.disconnect();
+    frameResizeObserver = null;
+  };
+  syncFrameViewport();
 }
 
 function prepareHtmlForFrame(html) {
@@ -1001,13 +1011,11 @@ function layoutRail() {
     cursor = item.top + item.height + RAIL_GAP;
   }
 
-  let maxBottom = 0;
   for (const item of [...anchored, ...unanchored]) {
     const top = Math.max(0, item.top);
     item.el.style.top = `${top}px`;
-    maxBottom = Math.max(maxBottom, top + item.height);
   }
-  commentRailInner.style.height = `${maxBottom + RAIL_INSET}px`;
+  commentRailInner.style.height = "";
 }
 
 function relativeTop(viewportTop, innerTop) {
@@ -1219,6 +1227,9 @@ function handleFrameClick(event) {
 
   const target = event.target;
   if (!(target instanceof frame.contentWindow.Element)) return;
+
+  if (handleFrameHashLinkClick(event, target)) return;
+
   const highlight = target.closest(".redline-highlight, .coauthor-highlight");
   // Clicking the anchored text springs its card into place without scrolling
   // (you're already looking at the anchor). Clicking anywhere else in the
@@ -1229,6 +1240,34 @@ function handleFrameClick(event) {
   }
   const threadId = highlight.getAttribute("data-thread-id");
   if (threadId) selectThread(threadId, true);
+}
+
+function handleFrameHashLinkClick(event, target) {
+  const link = target.closest("a[href]");
+  const rawHref = link?.getAttribute("href");
+  if (!rawHref?.startsWith("#")) return false;
+
+  event.preventDefault();
+  if (rawHref === "#") {
+    frame.contentWindow?.scrollTo({ top: 0, behavior: "smooth" });
+    return true;
+  }
+
+  const doc = frame.contentDocument;
+  const id = decodeHashFragment(rawHref.slice(1));
+  const destination =
+    (id ? doc?.getElementById(id) : null) ??
+    (id ? doc?.getElementsByName(id)[0] : null);
+  destination?.scrollIntoView({ block: "start", behavior: "smooth" });
+  return true;
+}
+
+function decodeHashFragment(value) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }
 
 function deselectThread() {

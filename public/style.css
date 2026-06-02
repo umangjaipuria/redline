@@ -35,6 +35,11 @@
   box-sizing: border-box;
 }
 
+html,
+body {
+  height: 100%;
+}
+
 [hidden] {
   display: none !important;
 }
@@ -43,6 +48,7 @@ body {
   margin: 0;
   color: var(--ink);
   background-color: var(--paper);
+  overflow: hidden;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -61,7 +67,8 @@ button:disabled {
 }
 
 .app-shell {
-  min-height: 100vh;
+  height: 100vh;
+  min-height: 0;
   display: flex;
   flex-direction: column;
 }
@@ -457,6 +464,7 @@ button.open-icon:disabled {
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 360px;
+  overflow: hidden;
   transition: grid-template-columns 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
@@ -469,6 +477,7 @@ button.open-icon:disabled {
 
 .document-pane {
   min-width: 0;
+  min-height: 0;
   padding: 12px;
   display: flex;
   flex-direction: column;
@@ -477,18 +486,16 @@ button.open-icon:disabled {
 }
 
 .document-frame {
+  flex: 1;
+  min-height: 0;
   display: block;
   width: 100%;
-  /* Height is set from the content by JS (resizeFrameToContent); this is just
-     a floor so short documents still fill the viewport. */
-  height: calc(100vh - 76px);
-  min-height: calc(100vh - 76px);
+  height: auto;
   border: 0;
   border-radius: 10px;
   background: #fff;
   /* A 1px ring via box-shadow instead of a real border: a border would shrink
-     the iframe's content box and make the document overflow by 2px, adding a
-     second (inner) scrollbar on top of the page scrollbar. */
+     the iframe's content box and can introduce document overflow. */
   box-shadow: 0 0 0 1px var(--line-soft), 0 1px 2px rgba(33, 28, 21, 0.04);
 }
 
@@ -531,12 +538,12 @@ button.open-icon:disabled {
 
 /* ---------- Comment rail ---------- */
 
-/* The rail is a margin: it scrolls with the page (not pinned) so each comment
-   can sit level with the text it annotates. Cards are absolutely positioned by
-   JS (layoutRail); the rail just provides the white column and the positioning
-   context. */
+/* The rail is a live margin next to the iframe viewport. Cards are absolutely
+   positioned by JS (layoutRail) against visible anchor positions inside the
+   reviewed document. */
 .comment-rail {
   min-width: 0;
+  min-height: 0;
   border-left: 1px solid var(--line);
   background: var(--paper);
   overflow: visible;
@@ -552,6 +559,7 @@ button.open-icon:disabled {
 
 .comment-rail-inner {
   position: relative;
+  height: 100%;
   width: 360px;
   max-width: 100%;
 }
@@ -794,6 +802,15 @@ textarea:focus {
 /* ---------- Responsive ---------- */
 
 @media (max-width: 940px) {
+  body {
+    overflow: auto;
+  }
+
+  .app-shell {
+    height: auto;
+    min-height: 100vh;
+  }
+
   .topbar {
     height: auto;
     align-items: stretch;
@@ -818,6 +835,7 @@ textarea:focus {
 
   .workspace {
     grid-template-columns: 1fr;
+    overflow: visible;
   }
 
   .document-pane,
@@ -830,17 +848,21 @@ textarea:focus {
   }
 
   .document-frame {
+    flex: none;
+    height: 62vh;
     min-height: 62vh;
   }
 
   .comment-rail {
     border-left: 0;
     border-top: 1px solid var(--line);
+    overflow: visible;
   }
 
   /* No side column to align to — drop the margin notes back into normal flow,
      stacked top to bottom. (layoutRail clears the inline `top`/`height` here.) */
   .comment-rail-inner {
+    height: auto;
     width: auto;
     padding: 16px;
   }

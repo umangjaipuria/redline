@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { handleAgentRequest } from "./agent-routes";
 import { handleCommentRequest } from "./comment-routes";
+import { createRequestHandler } from "./server";
 import { appendReply, createComment } from "./state";
 
 const tempDirs: string[] = [];
@@ -40,6 +41,16 @@ function commentRouter(documentPath: string) {
 function agentRouter(documentPath: string) {
   return (request: Request) => handleAgentRequest(request, { documentPath });
 }
+
+test("GET /document-assets/ does not stream the document directory", async () => {
+  const documentPath = tempDocument();
+  const handler = createRequestHandler({ documentPath, host: "127.0.0.1", port: 0 });
+
+  const response = await handler(new Request("http://127.0.0.1/document-assets/"));
+
+  expect(response.status).toBe(404);
+  expect(await response.text()).toBe("Not found");
+});
 
 test("GET /api/agent/comments returns comments without html", async () => {
   const documentPath = tempDocument();
