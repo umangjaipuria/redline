@@ -96,12 +96,21 @@ export interface AgentUpdateInput {
 const schemaVersion = 1;
 const emptyReviewUpdatedAt = "1970-01-01T00:00:00.000Z";
 const embeddedStateScriptId = "redline-state";
+const agentGuideMetaName = "redline-agent-guide";
+const agentGuideMetaContent =
+  "Redline document. Agents: use the redline-review workflow; comments live in #redline-state and data-redline-anchor spans.";
+const agentGuideMetaTag = `<meta name="${agentGuideMetaName}" content="${agentGuideMetaContent}">`;
+const agentGuideComment =
+  "<!-- redline-agent-guide: use the redline-review workflow; comments live in #redline-state and data-redline-anchor spans. -->";
 const embeddedStateScriptPattern =
   /<script\b(?=[^>]*\bid\s*=\s*(["'])redline-state\1)(?=[^>]*\btype\s*=\s*(["'])application\/json\2)[^>]*>[\s\S]*?<\/script>\s*/i;
 const legacyEmbeddedStateScriptPattern =
   /<script\b(?=[^>]*\bid\s*=\s*(["'])coauthor-state\1)(?=[^>]*\btype\s*=\s*(["'])application\/json\2)[^>]*>[\s\S]*?<\/script>\s*/i;
 const embeddedStateScriptRemovalPattern =
   /[ \t]*<script\b(?=[^>]*\bid\s*=\s*(["'])(?:redline-state|coauthor-state)\1)(?=[^>]*\btype\s*=\s*(["'])application\/json\2)[^>]*>[\s\S]*?<\/script>[ \t]*(?:\r?\n)?/gi;
+const agentGuideMetaPattern =
+  /<meta\b(?=[^>]*\bname\s*=\s*(["'])redline-agent-guide\1)[^>]*>/i;
+const agentGuideCommentPattern = /<!--\s*redline-agent-guide:/i;
 
 export function defaultDocumentPath(cwd = process.cwd()): string {
   return path.join(cwd, "documents", "sample.html");
@@ -124,6 +133,17 @@ export function ensureDocument(documentPath: string): void {
   if (fs.existsSync(documentPath)) return;
   fs.mkdirSync(path.dirname(documentPath), { recursive: true });
   fs.writeFileSync(documentPath, defaultHtml(), "utf8");
+}
+
+export function openDocumentForReview(documentPath: string): DocumentState {
+  const absoluteDocumentPath = path.resolve(documentPath);
+  ensureDocument(absoluteDocumentPath);
+  const html = fs.readFileSync(absoluteDocumentPath, "utf8");
+  const normalizedHtml = normalizeReviewHtml(html);
+  if (normalizedHtml !== html) {
+    writeFileAtomic(absoluteDocumentPath, normalizedHtml);
+  }
+  return readDocumentState(absoluteDocumentPath);
 }
 
 export function readDocumentState(documentPath: string): DocumentState {
@@ -466,7 +486,23 @@ function injectEmbeddedReviewState(html: string, reviewState: EmbeddedCommentSta
 }
 
 function normalizeReviewHtml(html: string): string {
-  return html.replace(/\bdata-coauthor-anchor=/gi, "data-redline-anchor=");
+  return ensureAgentDiscoveryMarker(html.replace(/\bdata-coauthor-anchor=/gi, "data-redline-anchor="));
+}
+
+function ensureAgentDiscoveryMarker(html: string): string {
+  if (agentGuideMetaPattern.test(html) || agentGuideCommentPattern.test(html)) {
+    return html;
+  }
+
+  if (/<\/head>/i.test(html)) {
+    return html.replace(/<\/head>/i, `    ${agentGuideMetaTag}\n  </head>`);
+  }
+
+  if (/<html\b[^>]*>/i.test(html)) {
+    return html.replace(/<html\b[^>]*>/i, (match) => `${match}\n  <head>\n    ${agentGuideMetaTag}\n  </head>`);
+  }
+
+  return `${agentGuideComment}\n${html}`;
 }
 
 function anchorIdsFor(threads: CommentThread[]): string[] {
@@ -608,6 +644,7 @@ function defaultHtml(): string {
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    ${agentGuideMetaTag}
     <title>Sample Redline document</title>
     <style>
       body {

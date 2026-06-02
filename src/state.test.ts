@@ -10,6 +10,7 @@ import {
   defaultDocumentPath,
   ensureDocument,
   legacySidecarPathFor,
+  openDocumentForReview,
   readCommentState,
   readDocumentState,
   readDocumentFileState,
@@ -60,6 +61,35 @@ test("creates a default document when one is missing", () => {
     messages: 0,
     unresolved: 0,
   });
+});
+
+test("opening a document for review adds an agent discovery marker", () => {
+  const documentPath = tempDocument();
+  fs.writeFileSync(
+    documentPath,
+    "<!doctype html><html><head><title>Draft</title></head><body><p>Hello world.</p></body></html>",
+  );
+
+  const opened = openDocumentForReview(documentPath);
+  const html = fs.readFileSync(documentPath, "utf8");
+
+  expect(opened.html).toContain('name="redline-agent-guide"');
+  expect(html).toContain('name="redline-agent-guide"');
+  expect(html).toContain("use the redline-review workflow");
+
+  openDocumentForReview(documentPath);
+  const afterSecondOpen = fs.readFileSync(documentPath, "utf8");
+  expect(afterSecondOpen.match(/name="redline-agent-guide"/g)?.length).toBe(1);
+});
+
+test("opening a fragment for review adds an agent discovery comment", () => {
+  const documentPath = tempDocument();
+  fs.writeFileSync(documentPath, "<p>Hello world.</p>");
+
+  const opened = openDocumentForReview(documentPath);
+
+  expect(opened.html.startsWith("<!-- redline-agent-guide:")).toBe(true);
+  expect(opened.html).toContain("data-redline-anchor spans");
 });
 
 test("creates, replies to, and resolves comment threads", () => {
@@ -263,7 +293,22 @@ test("embedded state is injected into documents without a head", () => {
   });
 
   expect(htmlDocument.html).toContain("<head>");
+  expect(htmlDocument.html).toContain('name="redline-agent-guide"');
   expect(htmlDocument.html).toContain('id="redline-state"');
+
+  const markedHtmlDocumentPath = tempDocument();
+  fs.writeFileSync(
+    markedHtmlDocumentPath,
+    "<!-- redline-agent-guide: existing marker --><html><body><p>Marked loose shell.</p></body></html>",
+  );
+
+  const markedHtmlDocument = createComment(markedHtmlDocumentPath, {
+    body: "Works with an existing marker.",
+    anchor: { type: "document" },
+  });
+
+  expect(markedHtmlDocument.html).toContain("<head>");
+  expect(markedHtmlDocument.html).toContain('id="redline-state"');
 
   const fragmentPath = tempDocument();
   fs.writeFileSync(fragmentPath, "<p>Fragment document.</p>");
@@ -297,7 +342,7 @@ test("browser-created comments keep inline anchors in the html", () => {
 
   resolveThread(documentPath, "thread_inline123");
 
-  expect(fs.readFileSync(documentPath, "utf8")).not.toContain("data-redline-anchor");
+  expect(fs.readFileSync(documentPath, "utf8")).not.toContain("data-redline-anchor=");
 });
 
 test("browser-created comments merge with existing embedded comments", () => {

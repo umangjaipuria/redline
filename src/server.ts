@@ -6,6 +6,7 @@ import { handleAgentRequest } from "./agent-routes";
 import { handleCommentRequest } from "./comment-routes";
 import {
   applyAgentUpdate,
+  openDocumentForReview,
   readDocumentState,
   resolveDocumentPath,
   writeDocumentHtml,
@@ -37,7 +38,7 @@ if (import.meta.main) {
 
 export function createRequestHandler(options: ServerOptions): (request: Request) => Promise<Response> {
   const runtime = createRuntime(options);
-  runtime.latestVersion = readDocumentState(runtime.options.documentPath).version;
+  runtime.latestVersion = openDocumentForReview(runtime.options.documentPath).version;
   return async (request) => {
     try {
       return await handleRequest(request, runtime);
@@ -50,6 +51,7 @@ export function createRequestHandler(options: ServerOptions): (request: Request)
 
 function startServer(options: ServerOptions): void {
   const runtime = createRuntime(options);
+  const openedState = openDocumentForReview(runtime.options.documentPath);
   const server = Bun.serve({
     hostname: runtime.options.host,
     port: runtime.options.port,
@@ -69,7 +71,7 @@ function startServer(options: ServerOptions): void {
 
   runtime.serverUrl = server.url.toString();
   writeServerState(runtime.serverUrl, runtime.options.documentPath);
-  runtime.latestVersion = readDocumentState(runtime.options.documentPath).version;
+  runtime.latestVersion = openedState.version;
   setInterval(() => pollForExternalChanges(runtime), 750).unref?.();
 
   console.log(`Redline is serving ${runtime.options.documentPath}`);
@@ -198,7 +200,7 @@ function openTarget(runtime: ServerRuntime, target: string): Response {
     writeServerState(runtime.serverUrl, runtime.options.documentPath);
   }
   console.log(`Redline switched to ${runtime.options.documentPath}`);
-  return changed(runtime, readDocumentState(runtime.options.documentPath), "document.opened");
+  return changed(runtime, openDocumentForReview(runtime.options.documentPath), "document.opened");
 }
 
 function pollForExternalChanges(runtime: ServerRuntime): void {

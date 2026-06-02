@@ -26,6 +26,12 @@ or:
 <span data-redline-anchor="thread_abc123">reviewed text</span>
 ```
 
+or an agent guide marker:
+
+```html
+<meta name="redline-agent-guide" content="...">
+```
+
 If the local server is running, `.redline/server.json` contains the current URL and document path.
 
 ## Read Feedback
@@ -68,6 +74,7 @@ Inline anchors are the durable location of a comment:
 
 Rules:
 
+- Redline stamps opened documents with `<meta name="redline-agent-guide" ...>` or a `redline-agent-guide` HTML comment so agents can discover this workflow from the file alone.
 - Do not delete a `data-redline-anchor` span unless explicitly resolving that thread.
 - When rewriting anchored text, preserve or move the span so it still wraps the relevant revised text.
 - Keep `thread.id`, `thread.anchor.anchorId`, and `data-redline-anchor` aligned when possible.

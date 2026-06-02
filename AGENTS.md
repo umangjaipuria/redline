@@ -18,6 +18,14 @@ Comment messages live in an inert JSON script tag:
 </script>
 ```
 
+Redline also stamps opened documents with an agent discovery marker:
+
+```html
+<meta name="redline-agent-guide" content="...">
+```
+
+For HTML fragments, the fallback is a `redline-agent-guide` HTML comment.
+
 When revising anchored text, preserve or move the surrounding `data-redline-anchor` span until the user or agent explicitly resolves the thread. Resolving a thread deletes it from the embedded state and unwraps its inline anchor. Older `.redline.json` and legacy `.coauthor.json` sidecars can still be read and are migrated into the HTML on the next write.
 
 ## Read Feedback

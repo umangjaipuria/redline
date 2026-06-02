@@ -16,6 +16,12 @@ Comment thread messages are stored in an inert JSON script tag:
 </script>
 ```
 
+When a document is opened with Redline, the app adds an agent discovery marker so an agent inspecting the file knows to use the Redline review workflow:
+
+```html
+<meta name="redline-agent-guide" content="...">
+```
+
 Resolved threads are deleted from that embedded state and their inline anchors are unwrapped. Older `.redline.json` and legacy `.coauthor.json` sidecars can still be read and are migrated into the HTML on the next write.
 
 ## Run
