@@ -3,6 +3,7 @@ import path from "node:path";
 import {
   appendReply,
   applyAgentUpdate,
+  deleteReply,
   readDocumentState,
   resolveDocumentPath,
   resolveThread,
@@ -46,6 +47,15 @@ function run(commandName: string | undefined, argsForCommand: string[]): void {
     const documentPath = resolveRequiredDocument(documentArg);
     if (!threadId) throw new Error("resolve requires a thread id.");
     printJson(resolveThread(documentPath, threadId));
+    return;
+  }
+
+  if (commandName === "delete-reply") {
+    const [documentArg, threadId, messageId] = argsForCommand;
+    const documentPath = resolveRequiredDocument(documentArg);
+    if (!threadId) throw new Error("delete-reply requires a thread id.");
+    if (!messageId) throw new Error("delete-reply requires a message id.");
+    printJson(deleteReply(documentPath, threadId, messageId));
     return;
   }
 
@@ -100,6 +110,7 @@ function printHelp(): void {
   console.log(`Usage:
   bun src/agent.ts state <document.html>
   bun src/agent.ts reply <document.html> <thread-id> <message> [--author AI]
+  bun src/agent.ts delete-reply <document.html> <thread-id> <message-id>
   bun src/agent.ts resolve <document.html> <thread-id>
   bun src/agent.ts apply <document.html> <payload.json>
   bun src/agent.ts update-html <document.html> <updated.html>
@@ -107,6 +118,7 @@ function printHelp(): void {
 The apply payload may include:
   {
     "html": "<!doctype html>...",
+    "comments": [{ "body": "...", "author": "AI", "anchor": { "type": "document" } }],
     "replies": [{ "threadId": "...", "body": "...", "author": "AI" }],
     "resolveThreadIds": ["..."]
   }`);

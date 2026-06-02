@@ -75,6 +75,18 @@ window.addEventListener("resize", () => {
 
 cancelCommentButton.addEventListener("click", () => closeComposer({ discardDraft: true }));
 commentBody.addEventListener("keydown", submitFormOnCommandEnter);
+document.addEventListener("pointerdown", (event) => {
+  const target = elementFromEventTarget(event.target);
+  if (target?.closest?.(".reply-form")) return;
+  closeEmptyReplyForms({ ignoreFocus: true });
+  deselectThreadIfOutsideComment(target);
+});
+document.addEventListener("focusin", (event) => {
+  const target = elementFromEventTarget(event.target);
+  if (target?.closest?.(".reply-form")) return;
+  closeEmptyReplyForms();
+  deselectThreadIfOutsideComment(target);
+});
 
 commentForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -134,6 +146,14 @@ threadsEl.addEventListener("click", async (event) => {
   const target = event.target;
   if (!(target instanceof Element)) return;
 
+  const deleteReplyButton = target.closest("[data-delete-reply-message]");
+  if (deleteReplyButton instanceof HTMLElement) {
+    const threadId = deleteReplyButton.getAttribute("data-delete-reply-thread");
+    const messageId = deleteReplyButton.getAttribute("data-delete-reply-message");
+    if (threadId && messageId) await deleteReply(threadId, messageId);
+    return;
+  }
+
   const resolveButton = target.closest("[data-resolve-thread]");
   if (resolveButton instanceof HTMLElement) {
     const id = resolveButton.getAttribute("data-resolve-thread");
@@ -167,6 +187,15 @@ threadsEl.addEventListener("keydown", (event) => {
   submitFormOnCommandEnter(event);
 });
 
+threadsEl.addEventListener("focusout", (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return;
+  const form = target.closest(".reply-form");
+  if (!(form instanceof HTMLFormElement)) return;
+
+  setTimeout(() => closeReplyFormIfEmpty(form), 0);
+});
+
 threadsEl.addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = event.target;
@@ -174,7 +203,11 @@ threadsEl.addEventListener("submit", async (event) => {
   const threadId = form.getAttribute("data-reply-form");
   const input = form.querySelector("textarea");
   const body = input?.value.trim() ?? "";
-  if (!threadId || !body) return;
+  if (!threadId) return;
+  if (!body) {
+    closeReplyForm(form);
+    return;
+  }
 
   const response = await fetch(`/api/comments/${encodeURIComponent(threadId)}/replies`, {
     method: "POST",
@@ -1071,11 +1104,29 @@ function renderThreads() {
         !anchoredThreadIds.has(thread.id);
       const messages = thread.messages
         .map(
-          (message) => `
+          (message, messageIndex) => `
             <div class="message">
               <div class="message-meta">
                 <span>${escapeHtml(message.author)}</span>
-                <time>${formatTime(message.createdAt)}</time>
+                <div class="message-meta-actions">
+                  <time>${formatTime(message.createdAt)}</time>
+                  ${
+                    messageIndex > 0
+                      ? `
+                        <button type="button" class="message-delete-button"
+                          data-delete-reply-thread="${escapeHtml(thread.id)}"
+                          data-delete-reply-message="${escapeHtml(message.id)}"
+                          title="Delete reply" aria-label="Delete reply">
+                          <svg class="btn-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                            <path d="M5 7h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                            <path d="M9.5 7V5.6a1.1 1.1 0 0 1 1.1-1.1h2.8a1.1 1.1 0 0 1 1.1 1.1V7" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+                            <path d="M6.7 7.5 7.6 18.6A1.4 1.4 0 0 0 9 20h6a1.4 1.4 0 0 0 1.4-1.4L17.3 7.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                          </svg>
+                        </button>
+                      `
+                      : ""
+                  }
+                </div>
               </div>
               <p>${escapeHtml(message.body)}</p>
             </div>
@@ -1137,7 +1188,35 @@ function openReplyForThread(threadId) {
   form.querySelector("textarea")?.focus();
 }
 
+function closeEmptyReplyForms({ ignoreFocus = false } = {}) {
+  for (const form of threadsEl.querySelectorAll(".reply-form")) {
+    closeReplyFormIfEmpty(form, { ignoreFocus });
+  }
+}
+
+function closeReplyFormIfEmpty(form, { ignoreFocus = false } = {}) {
+  if (form.hidden) return;
+  if (!ignoreFocus && form.contains(document.activeElement)) return;
+  const input = form.querySelector("textarea");
+  if (input?.value.trim()) return;
+  closeReplyForm(form);
+}
+
+function closeReplyForm(form) {
+  const input = form.querySelector("textarea");
+  if (input) input.value = "";
+  form.hidden = true;
+  layoutRail();
+}
+
+function deselectThreadIfOutsideComment(target) {
+  if (target?.closest?.(".thread-card")) return;
+  deselectThread();
+}
+
 function handleFrameClick(event) {
+  closeEmptyReplyForms({ ignoreFocus: true });
+
   const target = event.target;
   if (!(target instanceof frame.contentWindow.Element)) return;
   const highlight = target.closest(".redline-highlight, .coauthor-highlight");
@@ -1192,6 +1271,24 @@ async function resolveComment(threadId) {
   }
   state = await response.json();
   if (activeThreadId === threadId) activeThreadId = null;
+  render();
+}
+
+async function deleteReply(threadId, messageId) {
+  const response = await fetch(
+    `/api/comments/${encodeURIComponent(threadId)}/replies/${encodeURIComponent(messageId)}`,
+    { method: "DELETE" },
+  );
+
+  if (!response.ok) {
+    const payload = await readJsonPayload(response);
+    showNotice("Reply delete failed", payload.error || "Redline could not delete this reply.");
+    updateToolbar();
+    return;
+  }
+
+  state = await response.json();
+  activeThreadId = threadId;
   render();
 }
 

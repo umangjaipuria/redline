@@ -1,6 +1,6 @@
 ---
 name: redline-review
-description: Work with Redline for reviewing AI-authored HTML documents. Use when the user asks to use Redline, asks an agent to review or revise a document it wrote, needs browser-visible comments/replies/resolves, or when reading, preserving, adding, replying to, resolving, or acting on Redline comments with inline data-redline-anchor spans and embedded thread state.
+description: Work with Redline for reviewing AI-authored HTML documents. Use when the user asks to use Redline, asks an agent to review or revise a document it wrote, needs browser-visible comments, replies, reply deletes, or resolves, or when reading, preserving, adding, replying to, resolving, or acting on Redline comments with inline data-redline-anchor spans and embedded thread state.
 ---
 
 # Redline Review
@@ -13,7 +13,7 @@ Use this skill when:
 
 - The user asks to use Redline.
 - The user asks an agent to review, revise, or respond to feedback on an HTML document the agent wrote.
-- The task involves browser-visible comments, replies, resolves, or review threads on HTML.
+- The task involves browser-visible comments, replies, reply deletes, resolves, or review threads on HTML.
 - An HTML file already contains Redline state:
 
 ```html
@@ -42,7 +42,7 @@ With a running server, read:
 GET /api/agent/state
 ```
 
-The returned state includes `html`, `threads`, `version`, and `summary`. Each thread has an `id`, `anchor`, `quote`, and `messages`.
+The returned state includes `html`, `threads`, `version`, and `summary`. Each thread has an `id`, `anchor`, `quote`, and `messages`. Message ids are durable; the first message is the original comment, and later messages are replies.
 
 ## Preserve Anchors
 
@@ -60,7 +60,7 @@ Rules:
 - Do not add runtime classes such as `redline-highlight`; the app adds those while rendering.
 - If an anchor disappears, Redline may fall back to quote matching, but the thread should remain open until resolved.
 
-## Reply Or Resolve
+## Comments, Replies, And Deletes
 
 Reply after making a relevant change:
 
@@ -68,13 +68,32 @@ Reply after making a relevant change:
 bun src/agent.ts reply <document.html> <thread-id> "I revised this section." --author AI
 ```
 
-Resolve only when the requested work is done or the user asks:
+Delete one reply, and only that reply, by message id:
+
+```bash
+bun src/agent.ts delete-reply <document.html> <thread-id> <message-id>
+```
+
+Only delete messages after the first message in a thread. The first message is the original comment; deleting it means resolving/deleting the whole thread instead.
+
+Resolve or delete a whole thread only when the requested work is done or the user asks:
 
 ```bash
 bun src/agent.ts resolve <document.html> <thread-id>
 ```
 
-`resolve` removes the thread from `#redline-state` and unwraps its inline anchor.
+`resolve` removes the thread from `#redline-state` and unwraps its inline anchor. In the browser UI, the thread delete button performs this same resolve operation.
+
+With a running server, agents may use the equivalent HTTP endpoints:
+
+```text
+POST /api/comments/<thread-id>/replies
+DELETE /api/comments/<thread-id>/replies/<message-id>
+POST /api/comments/<thread-id>/resolve
+DELETE /api/comments/<thread-id>
+```
+
+Use `.redline/server.json` to find the current server URL and document path.
 
 ## Revise HTML
 
@@ -93,6 +112,18 @@ Payloads may include:
 ```json
 {
   "html": "<!doctype html>...",
+  "comments": [
+    {
+      "body": "This claim needs a source.",
+      "author": "AI",
+      "quote": "growth improved by 40%",
+      "anchor": {
+        "type": "text-range",
+        "anchorId": "thread_source_needed",
+        "quote": "growth improved by 40%"
+      }
+    }
+  ],
   "replies": [{ "threadId": "thread_abc123", "body": "Updated.", "author": "AI" }],
   "resolveThreadIds": ["thread_done456"]
 }
@@ -100,7 +131,7 @@ Payloads may include:
 
 ## Add A Comment
 
-For direct HTML editing, choose a unique thread id, wrap the exact target text, and add a matching thread entry.
+For direct HTML editing, choose a unique thread id, wrap the exact target text, and add a matching thread entry. Prefer the browser selection UI or `bun src/agent.ts apply` with a `comments` entry when possible; use manual embedded-state editing only when a helper/API path is not enough.
 
 HTML:
 

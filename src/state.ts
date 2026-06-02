@@ -204,6 +204,35 @@ export function appendReply(
   return readDocumentState(absoluteDocumentPath);
 }
 
+export function deleteReply(
+  documentPath: string,
+  threadId: string,
+  messageId: string,
+): DocumentState {
+  const absoluteDocumentPath = path.resolve(documentPath);
+  const html = readDocumentHtml(absoluteDocumentPath);
+  const reviewState = readReviewState(absoluteDocumentPath, html);
+  const thread = reviewState.threads.find((item) => item.id === threadId);
+  if (!thread) {
+    throw new Error(`Comment thread not found: ${threadId}`);
+  }
+
+  const messageIndex = thread.messages.findIndex((message) => message.id === messageId);
+  if (messageIndex === -1) {
+    throw new Error(`Reply not found: ${messageId}`);
+  }
+  if (messageIndex === 0) {
+    throw new Error("The original comment cannot be deleted as a reply.");
+  }
+
+  thread.messages.splice(messageIndex, 1);
+  const now = new Date().toISOString();
+  thread.updatedAt = now;
+  reviewState.updatedAt = now;
+  writeHtmlWithReviewState(absoluteDocumentPath, html, reviewState);
+  return readDocumentState(absoluteDocumentPath);
+}
+
 export function resolveThread(documentPath: string, threadId: string): DocumentState {
   const absoluteDocumentPath = path.resolve(documentPath);
   const html = readDocumentHtml(absoluteDocumentPath);

@@ -6,8 +6,12 @@ import {
   appendReply,
   applyAgentUpdate,
   createComment,
+  deleteReply,
+  defaultDocumentPath,
+  ensureDocument,
   legacySidecarPathFor,
   readDocumentState,
+  resolveDocumentPath,
   resolveThread,
   sidecarPathFor,
   writeSidecar,
@@ -29,6 +33,32 @@ function tempDocument() {
   fs.writeFileSync(documentPath, "<!doctype html><html><body><p>Hello world.</p></body></html>");
   return documentPath;
 }
+
+test("resolves default and explicit document paths", () => {
+  const cwd = path.join(os.tmpdir(), "workspace");
+
+  expect(defaultDocumentPath(cwd)).toBe(path.join(cwd, "documents", "sample.html"));
+  expect(resolveDocumentPath(undefined, cwd)).toBe(path.join(cwd, "documents", "sample.html"));
+  expect(resolveDocumentPath("docs/draft.html", cwd)).toBe(path.join(cwd, "docs/draft.html"));
+  expect(resolveDocumentPath("   ", cwd)).toBe(path.join(cwd, "documents", "sample.html"));
+  expect(resolveDocumentPath("/tmp/draft.html", cwd)).toBe("/tmp/draft.html");
+});
+
+test("creates a default document when one is missing", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "redline-"));
+  tempDirs.push(dir);
+  const documentPath = path.join(dir, "nested", "missing.html");
+
+  ensureDocument(documentPath);
+
+  const html = fs.readFileSync(documentPath, "utf8");
+  expect(html).toContain("<h1>Redline sample</h1>");
+  expect(readDocumentState(documentPath).summary).toEqual({
+    threads: 0,
+    messages: 0,
+    unresolved: 0,
+  });
+});
 
 test("creates, replies to, and resolves comment threads", () => {
   const documentPath = tempDocument();
@@ -56,6 +86,71 @@ test("creates, replies to, and resolves comment threads", () => {
   expect(fs.existsSync(sidecarPathFor(documentPath))).toBe(false);
 });
 
+test("deletes a single reply without removing the thread", () => {
+  const documentPath = tempDocument();
+  const withComment = createComment(documentPath, {
+    body: "Root comment.",
+    author: "User",
+    anchor: { type: "document" },
+  });
+  const threadId = withComment.threads[0]?.id ?? "";
+  const withFirstReply = appendReply(documentPath, threadId, "First reply.", "AI");
+  appendReply(documentPath, threadId, "Second reply.", "User");
+  const replyId = withFirstReply.threads[0]?.messages[1]?.id ?? "";
+
+  const updated = deleteReply(documentPath, threadId, replyId);
+
+  expect(updated.threads).toHaveLength(1);
+  expect(updated.threads[0]?.messages.map((message) => message.body)).toEqual([
+    "Root comment.",
+    "Second reply.",
+  ]);
+  expect(updated.summary).toEqual({
+    threads: 1,
+    messages: 2,
+    unresolved: 1,
+  });
+});
+
+test("rejects invalid comment operations", () => {
+  const documentPath = tempDocument();
+  const withComment = createComment(documentPath, {
+    threadId: "thread_fixed",
+    body: "First note.",
+    anchor: { type: "document" },
+  });
+  const rootMessageId = withComment.threads[0]?.messages[0]?.id ?? "";
+
+  expect(() =>
+    createComment(documentPath, {
+      threadId: "thread_fixed",
+      body: "Duplicate note.",
+      anchor: { type: "document" },
+    }),
+  ).toThrow("Comment thread already exists");
+  expect(() => createComment(documentPath, { body: "  ", anchor: { type: "document" } })).toThrow(
+    "Comment body is required.",
+  );
+  expect(() => appendReply(documentPath, "thread_missing", "Reply.", "AI")).toThrow(
+    "Comment thread not found",
+  );
+  expect(() => deleteReply(documentPath, "thread_missing", "message_missing")).toThrow(
+    "Comment thread not found",
+  );
+  expect(() => deleteReply(documentPath, "thread_fixed", "message_missing")).toThrow(
+    "Reply not found",
+  );
+  expect(() => deleteReply(documentPath, "thread_fixed", rootMessageId)).toThrow(
+    "The original comment cannot be deleted as a reply.",
+  );
+  expect(() => resolveThread(documentPath, "thread_missing")).toThrow("Comment thread not found");
+  expect(() =>
+    applyAgentUpdate(documentPath, {
+      replies: [{ threadId: "thread_missing", body: "Reply.", author: "AI" }],
+    }),
+  ).toThrow("Comment thread not found");
+});
+
 test("agent updates can replace html and append replies together", () => {
   const documentPath = tempDocument();
   const withComment = createComment(documentPath, {
@@ -78,6 +173,38 @@ test("agent updates can replace html and append replies together", () => {
   expect(updated.threads[0]?.messages.at(-1)?.author).toBe("AI");
 });
 
+test("agent updates can add comments and resolve inline anchors", () => {
+  const documentPath = tempDocument();
+  const withComment = createComment(documentPath, {
+    threadId: "thread_inline789",
+    body: "This one can be resolved.",
+    quote: "Hello world.",
+    html: '<!doctype html><html><body><p><span data-redline-anchor="thread_inline789">Hello world.</span></p></body></html>',
+    anchor: {
+      type: "text-range",
+      anchorId: "thread_inline789",
+      quote: "Hello world.",
+    },
+  });
+
+  const updated = applyAgentUpdate(documentPath, {
+    html: withComment.html,
+    comments: [
+      {
+        body: "Fresh agent note.",
+        author: "AI",
+        quote: "Document-level follow-up.",
+        anchor: { type: "document" },
+      },
+    ],
+    resolveThreadIds: ["thread_inline789"],
+  });
+
+  expect(updated.threads).toHaveLength(1);
+  expect(updated.threads[0]?.messages[0]?.body).toBe("Fresh agent note.");
+  expect(updated.html).not.toContain('data-redline-anchor="thread_inline789"');
+});
+
 test("writing html preserves existing comments", () => {
   const documentPath = tempDocument();
   const before = createComment(documentPath, {
@@ -91,6 +218,29 @@ test("writing html preserves existing comments", () => {
   expect(after.html).toContain("Changed.");
   expect(after.threads[0]?.id).toBe(before.threads[0]?.id);
   expect(after.html).toContain('id="redline-state"');
+});
+
+test("embedded state is injected into documents without a head", () => {
+  const htmlDocumentPath = tempDocument();
+  fs.writeFileSync(htmlDocumentPath, "<html><body><p>Loose shell.</p></body></html>");
+
+  const htmlDocument = createComment(htmlDocumentPath, {
+    body: "Works without a head.",
+    anchor: { type: "document" },
+  });
+
+  expect(htmlDocument.html).toContain("<head>");
+  expect(htmlDocument.html).toContain('id="redline-state"');
+
+  const fragmentPath = tempDocument();
+  fs.writeFileSync(fragmentPath, "<p>Fragment document.</p>");
+
+  const fragmentDocument = createComment(fragmentPath, {
+    body: "Works as a fragment.",
+    anchor: { type: "document" },
+  });
+
+  expect(fragmentDocument.html.startsWith('<script type="application/json" id="redline-state">')).toBe(true);
 });
 
 test("browser-created comments keep inline anchors in the html", () => {

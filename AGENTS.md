@@ -44,6 +44,14 @@ To reply without changing the document:
 bun src/agent.ts reply documents/draft.html <thread-id> "Reply text" --author AI
 ```
 
+To delete one reply without deleting the whole thread, use the reply message id:
+
+```bash
+bun src/agent.ts delete-reply documents/draft.html <thread-id> <message-id>
+```
+
+Only delete messages after the first message in a thread. The first message is the original comment; resolving/deleting the thread removes that original comment and unwraps its anchor.
+
 To apply content and replies in one step, write a temporary JSON payload and run:
 
 ```bash
@@ -55,6 +63,18 @@ Example payload:
 ```json
 {
   "html": "<!doctype html><html><body><p>Updated content.</p></body></html>",
+  "comments": [
+    {
+      "body": "This claim needs a source.",
+      "author": "AI",
+      "quote": "reviewed text",
+      "anchor": {
+        "type": "text-range",
+        "anchorId": "thread_abc123",
+        "quote": "reviewed text"
+      }
+    }
+  ],
   "replies": [
     {
       "threadId": "thread_abc123",
@@ -71,5 +91,7 @@ Resolve a thread only when the requested work is complete or the user asks for i
 ```bash
 bun src/agent.ts resolve documents/draft.html <thread-id>
 ```
+
+When the server is running, agents can also use `POST /api/comments/<thread-id>/replies`, `DELETE /api/comments/<thread-id>/replies/<message-id>`, `POST /api/comments/<thread-id>/resolve`, and `DELETE /api/comments/<thread-id>`.
 
 When Redline is open in a browser, direct helper edits are picked up by the running server and pushed to the page.

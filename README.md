@@ -71,6 +71,12 @@ Reply to a comment thread:
 bun src/agent.ts reply documents/sample.html thread_abc123 "I updated this section." --author AI
 ```
 
+Delete one reply without deleting the whole thread:
+
+```bash
+bun src/agent.ts delete-reply documents/sample.html thread_abc123 message_reply456
+```
+
 Resolve a completed thread:
 
 ```bash
@@ -103,6 +109,7 @@ When the server is running, agents can also use HTTP:
 
 ```bash
 curl http://127.0.0.1:7331/api/agent/state
+curl -X DELETE http://127.0.0.1:7331/api/comments/thread_abc123/replies/message_reply456
 curl -X POST http://127.0.0.1:7331/api/agent/update \
   -H 'Content-Type: application/json' \
   -d @/tmp/redline-update.json

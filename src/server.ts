@@ -2,23 +2,27 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { handleCommentRequest } from "./comment-routes";
 import {
-  appendReply,
   applyAgentUpdate,
-  createComment,
   readDocumentState,
   resolveDocumentPath,
-  resolveThread,
   writeDocumentHtml,
   type AgentUpdateInput,
-  type CreateCommentInput,
   type DocumentState,
 } from "./state";
 
-interface ServerOptions {
+export interface ServerOptions {
   documentPath: string;
   host: string;
   port: number;
+}
+
+interface ServerRuntime {
+  options: ServerOptions;
+  latestVersion: string;
+  eventClients: Set<ReadableStreamDefaultController<Uint8Array>>;
+  serverUrl?: string;
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -26,36 +30,61 @@ const publicDir = path.resolve(__dirname, "../public");
 const stateDir = path.resolve(process.cwd(), ".redline");
 const textEncoder = new TextEncoder();
 
-const options = parseArgs(Bun.argv.slice(2));
-let latestVersion = "";
-const eventClients = new Set<ReadableStreamDefaultController<Uint8Array>>();
+if (import.meta.main) {
+  startServer(parseArgs(Bun.argv.slice(2)));
+}
 
-const server = Bun.serve({
-  hostname: options.host,
-  port: options.port,
-  // The /api/events SSE stream is long-lived and only sends data when the
-  // document changes. Bun's default 10s idleTimeout would drop it (and log a
-  // warning) on every quiet stretch; a heartbeat keeps it under this ceiling.
-  idleTimeout: 120,
-  async fetch(request) {
+export function createRequestHandler(options: ServerOptions): (request: Request) => Promise<Response> {
+  const runtime = createRuntime(options);
+  runtime.latestVersion = readDocumentState(runtime.options.documentPath).version;
+  return async (request) => {
     try {
-      return await handleRequest(request);
+      return await handleRequest(request, runtime);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown server error.";
       return json({ error: message }, 500);
     }
-  },
-});
+  };
+}
 
-writeServerState(server.url.toString(), options.documentPath);
-latestVersion = readDocumentState(options.documentPath).version;
-setInterval(pollForExternalChanges, 750).unref?.();
+function startServer(options: ServerOptions): void {
+  const runtime = createRuntime(options);
+  const server = Bun.serve({
+    hostname: runtime.options.host,
+    port: runtime.options.port,
+    // The /api/events SSE stream is long-lived and only sends data when the
+    // document changes. Bun's default 10s idleTimeout would drop it (and log a
+    // warning) on every quiet stretch; a heartbeat keeps it under this ceiling.
+    idleTimeout: 120,
+    async fetch(request) {
+      try {
+        return await handleRequest(request, runtime);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown server error.";
+        return json({ error: message }, 500);
+      }
+    },
+  });
 
-console.log(`Redline is serving ${options.documentPath}`);
-console.log(`Open ${server.url}`);
-console.log(`Agent state: ${new URL("/api/agent/state", server.url)}`);
+  runtime.serverUrl = server.url.toString();
+  writeServerState(runtime.serverUrl, runtime.options.documentPath);
+  runtime.latestVersion = readDocumentState(runtime.options.documentPath).version;
+  setInterval(() => pollForExternalChanges(runtime), 750).unref?.();
 
-async function handleRequest(request: Request): Promise<Response> {
+  console.log(`Redline is serving ${runtime.options.documentPath}`);
+  console.log(`Open ${server.url}`);
+  console.log(`Agent state: ${new URL("/api/agent/state", server.url)}`);
+}
+
+function createRuntime(options: ServerOptions): ServerRuntime {
+  return {
+    options: { ...options },
+    latestVersion: "",
+    eventClients: new Set<ReadableStreamDefaultController<Uint8Array>>(),
+  };
+}
+
+async function handleRequest(request: Request, runtime: ServerRuntime): Promise<Response> {
   const url = new URL(request.url);
 
   // The API can read/write/switch files on disk. Block requests carrying a
@@ -71,11 +100,11 @@ async function handleRequest(request: Request): Promise<Response> {
   }
 
   if (url.pathname === "/api/health") {
-    return json({ ok: true, documentPath: options.documentPath });
+    return json({ ok: true, documentPath: runtime.options.documentPath });
   }
 
   if (url.pathname === "/api/state" || url.pathname === "/api/agent/state") {
-    return json(readDocumentState(options.documentPath));
+    return json(readDocumentState(runtime.options.documentPath));
   }
 
   if (url.pathname === "/api/open" && request.method === "POST") {
@@ -83,13 +112,13 @@ async function handleRequest(request: Request): Promise<Response> {
     if (typeof body.path !== "string" || !body.path.trim()) {
       return json({ error: "A file path is required." }, 400);
     }
-    return openTarget(expandPath(body.path));
+    return openTarget(runtime, expandPath(body.path));
   }
 
   if (url.pathname === "/api/open-dialog" && request.method === "POST") {
     let picked: string | null;
     try {
-      picked = await pickFileWithNativeDialog(path.dirname(options.documentPath), request.signal);
+      picked = await pickFileWithNativeDialog(path.dirname(runtime.options.documentPath), request.signal);
     } catch (error) {
       const message = error instanceof Error ? error.message : "The file picker failed.";
       return json({ error: message }, 500);
@@ -97,7 +126,7 @@ async function handleRequest(request: Request): Promise<Response> {
     if (picked === null) {
       return json({ cancelled: true });
     }
-    return openTarget(picked);
+    return openTarget(runtime, picked);
   }
 
   if (url.pathname === "/api/document" && request.method === "PUT") {
@@ -107,106 +136,81 @@ async function handleRequest(request: Request): Promise<Response> {
     }
     if (
       typeof body.expectedVersion === "string" &&
-      body.expectedVersion !== readDocumentState(options.documentPath).version
+      body.expectedVersion !== readDocumentState(runtime.options.documentPath).version
     ) {
       return json(
         {
           error: "Document changed before this save completed.",
-          current: readDocumentState(options.documentPath),
+          current: readDocumentState(runtime.options.documentPath),
         },
         409,
       );
     }
-    return changed(writeDocumentHtml(options.documentPath, body.html), "document.saved");
+    return changed(runtime, writeDocumentHtml(runtime.options.documentPath, body.html), "document.saved");
   }
 
-  if (url.pathname === "/api/comments" && request.method === "POST") {
-    const body = await readJson<CreateCommentInput>(request);
-    if (
-      typeof body.expectedVersion === "string" &&
-      body.expectedVersion !== readDocumentState(options.documentPath).version
-    ) {
-      return json(
-        {
-          error: "Document changed before this comment was saved.",
-          current: readDocumentState(options.documentPath),
-        },
-        409,
-      );
-    }
-    return changed(createComment(options.documentPath, body), "comment.created");
-  }
-
-  const replyMatch = url.pathname.match(/^\/api\/comments\/([^/]+)\/replies$/);
-  if (replyMatch && request.method === "POST") {
-    const body = await readJson<{ body?: unknown; author?: unknown }>(request);
-    if (typeof body.body !== "string") {
-      return json({ error: "body is required." }, 400);
-    }
-    const author = typeof body.author === "string" ? body.author : "User";
-    return changed(appendReply(options.documentPath, replyMatch[1] ?? "", body.body, author), "reply.created");
-  }
-
-  const resolveMatch = url.pathname.match(/^\/api\/comments\/([^/]+)\/resolve$/);
-  if (resolveMatch && request.method === "POST") {
-    return changed(resolveThread(options.documentPath, resolveMatch[1] ?? ""), "comment.resolved");
-  }
-
-  const deleteMatch = url.pathname.match(/^\/api\/comments\/([^/]+)$/);
-  if (deleteMatch && request.method === "DELETE") {
-    return changed(resolveThread(options.documentPath, deleteMatch[1] ?? ""), "comment.resolved");
-  }
+  const commentResponse = await handleCommentRequest(request, {
+    documentPath: runtime.options.documentPath,
+    changed: (state, reason) => changed(runtime, state, reason),
+  });
+  if (commentResponse) return commentResponse;
 
   if (url.pathname === "/api/agent/update" && request.method === "POST") {
     const body = await readJson<AgentUpdateInput>(request);
-    return changed(applyAgentUpdate(options.documentPath, body), "agent.updated");
+    return changed(runtime, applyAgentUpdate(runtime.options.documentPath, body), "agent.updated");
   }
 
   if (url.pathname === "/api/events") {
-    return eventStream();
+    return eventStream(runtime);
   }
 
   if (url.pathname.startsWith("/document-assets/")) {
-    return serveDocumentAsset(url.pathname);
+    return serveDocumentAsset(runtime, url.pathname);
   }
 
   return serveStatic(url.pathname);
 }
 
-function changed(state: DocumentState, reason: string): Response {
-  latestVersion = state.version;
-  broadcast(reason, state);
+function changed(runtime: ServerRuntime, state: DocumentState, reason: string): Response {
+  runtime.latestVersion = state.version;
+  broadcast(runtime, reason, state);
   return json(state);
 }
 
 // Validate and switch the served document. Redline only renders HTML, so reject
 // anything that isn't an existing .html/.htm file (the picker filter is only a
 // hint — this is the actual guard).
-function openTarget(target: string): Response {
+function openTarget(runtime: ServerRuntime, target: string): Response {
   if (!fs.existsSync(target) || !fs.statSync(target).isFile()) {
     return json({ error: `Not a file: ${target}` }, 404);
   }
   if (!/\.html?$/i.test(target)) {
     return json({ error: "Redline can only open .html or .htm files." }, 415);
   }
-  options.documentPath = target;
-  writeServerState(server.url.toString(), options.documentPath);
-  console.log(`Redline switched to ${options.documentPath}`);
-  return changed(readDocumentState(options.documentPath), "document.opened");
+  runtime.options.documentPath = target;
+  if (runtime.serverUrl) {
+    writeServerState(runtime.serverUrl, runtime.options.documentPath);
+  }
+  console.log(`Redline switched to ${runtime.options.documentPath}`);
+  return changed(runtime, readDocumentState(runtime.options.documentPath), "document.opened");
 }
 
-function pollForExternalChanges(): void {
+function pollForExternalChanges(runtime: ServerRuntime): void {
   try {
-    const state = readDocumentState(options.documentPath);
-    if (state.version === latestVersion) return;
-    latestVersion = state.version;
-    broadcast("external.changed", state);
+    const state = readDocumentState(runtime.options.documentPath);
+    if (state.version === runtime.latestVersion) return;
+    runtime.latestVersion = state.version;
+    broadcast(runtime, "external.changed", state);
   } catch {
     // Keep the server alive if an editor temporarily swaps files on disk.
   }
 }
 
-function broadcast(reason: string, state = readDocumentState(options.documentPath)): void {
+function broadcast(
+  runtime: ServerRuntime,
+  reason: string,
+  state = readDocumentState(runtime.options.documentPath),
+): void {
   const payload = `event: state\ndata: ${JSON.stringify({
     reason,
     version: state.version,
@@ -214,22 +218,22 @@ function broadcast(reason: string, state = readDocumentState(options.documentPat
     summary: state.summary,
   })}\n\n`;
 
-  for (const client of [...eventClients]) {
+  for (const client of [...runtime.eventClients]) {
     try {
       client.enqueue(textEncoder.encode(payload));
     } catch {
-      eventClients.delete(client);
+      runtime.eventClients.delete(client);
     }
   }
 }
 
-function eventStream(): Response {
+function eventStream(runtime: ServerRuntime): Response {
   let streamController: ReadableStreamDefaultController<Uint8Array> | null = null;
   let heartbeat: ReturnType<typeof setInterval> | undefined;
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       streamController = controller;
-      eventClients.add(controller);
+      runtime.eventClients.add(controller);
       controller.enqueue(textEncoder.encode("event: connected\ndata: {}\n\n"));
       // Comment line every 25s keeps the connection active so it never trips
       // the idleTimeout during quiet periods.
@@ -238,7 +242,7 @@ function eventStream(): Response {
           controller.enqueue(textEncoder.encode(": keepalive\n\n"));
         } catch {
           clearInterval(heartbeat);
-          eventClients.delete(controller);
+          runtime.eventClients.delete(controller);
         }
       }, 25_000);
       heartbeat.unref?.();
@@ -246,7 +250,7 @@ function eventStream(): Response {
     cancel() {
       clearInterval(heartbeat);
       if (streamController) {
-        eventClients.delete(streamController);
+        runtime.eventClients.delete(streamController);
       }
     },
   });
@@ -282,9 +286,9 @@ function serveStatic(urlPath: string): Response {
   });
 }
 
-function serveDocumentAsset(urlPath: string): Response {
+function serveDocumentAsset(runtime: ServerRuntime, urlPath: string): Response {
   const relativePath = decodeURIComponent(urlPath.replace(/^\/document-assets\/?/, ""));
-  const documentDir = path.dirname(options.documentPath);
+  const documentDir = path.dirname(runtime.options.documentPath);
   const absolutePath = path.resolve(documentDir, relativePath);
   if (!isInside(documentDir, absolutePath) || !fs.existsSync(absolutePath)) {
     return new Response("Not found", { status: 404 });

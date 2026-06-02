@@ -7,9 +7,12 @@
   "scripts": {
     "start": "bun src/server.ts",
     "dev": "bun --watch src/server.ts",
-    "check": "bun test",
+    "check": "bun test --coverage",
+    "test": "bun test",
+    "coverage": "bun test --coverage",
     "agent:state": "bun src/agent.ts state",
     "agent:reply": "bun src/agent.ts reply",
+    "agent:delete-reply": "bun src/agent.ts delete-reply",
     "agent:resolve": "bun src/agent.ts resolve",
     "agent:apply": "bun src/agent.ts apply"
   },
