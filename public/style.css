@@ -1,0 +1,387 @@
+:root {
+  color-scheme: light;
+  --bg: #eef2f0;
+  --panel: #ffffff;
+  --ink: #1f2933;
+  --muted: #687782;
+  --line: #d8dfdb;
+  --accent: #0f766e;
+  --accent-strong: #115e59;
+  --gold: #b7791f;
+  --danger: #b42318;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+button,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.app-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 18px;
+  background: rgba(255, 255, 255, 0.92);
+  border-bottom: 1px solid var(--line);
+  backdrop-filter: blur(16px);
+}
+
+.document-meta {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.app-name {
+  font-weight: 750;
+  letter-spacing: 0;
+}
+
+.document-path {
+  max-width: min(58vw, 760px);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.author-control {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.author-control input {
+  width: 118px;
+  border: 0;
+  outline: 0;
+  padding: 0;
+  color: var(--ink);
+  background: transparent;
+}
+
+.save-status {
+  min-width: 92px;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+  background: #f8faf9;
+  text-align: center;
+  font-size: 13px;
+}
+
+.save-status[data-tone="success"] {
+  color: var(--accent-strong);
+  border-color: rgba(15, 118, 110, 0.24);
+}
+
+.save-status[data-tone="warning"] {
+  color: var(--gold);
+  border-color: rgba(183, 121, 31, 0.28);
+}
+
+.ghost-button,
+.primary-button {
+  min-height: 34px;
+  border-radius: 6px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+}
+
+.ghost-button:hover,
+.ghost-button.active {
+  border-color: rgba(15, 118, 110, 0.34);
+  color: var(--accent-strong);
+  background: #f1fbf8;
+}
+
+.primary-button {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.primary-button:hover {
+  background: var(--accent-strong);
+}
+
+.workspace {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+}
+
+.document-pane {
+  min-width: 0;
+  min-height: calc(100vh - 64px);
+  padding: 22px;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 12px;
+}
+
+.document-frame {
+  width: 100%;
+  height: 100%;
+  min-height: 520px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 16px 45px rgba(31, 41, 51, 0.08);
+}
+
+.notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid rgba(183, 121, 31, 0.28);
+  border-radius: 8px;
+  background: #fff8eb;
+}
+
+.notice p {
+  margin: 3px 0 0;
+  color: var(--muted);
+}
+
+.comment-rail {
+  min-width: 0;
+  min-height: calc(100vh - 64px);
+  border-left: 1px solid var(--line);
+  background: #f8faf9;
+  padding: 16px;
+  overflow: auto;
+}
+
+.rail-summary,
+.composer,
+.thread-card,
+.empty-state {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.rail-summary {
+  padding: 14px;
+  margin-bottom: 12px;
+}
+
+.rail-heading {
+  font-weight: 750;
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 13px;
+  margin-top: 2px;
+}
+
+.composer {
+  padding: 14px;
+  margin-bottom: 12px;
+}
+
+.composer blockquote {
+  margin: 10px 0;
+  padding: 8px 10px;
+  border-left: 3px solid var(--accent);
+  color: #40515c;
+  background: #f2f7f4;
+}
+
+textarea {
+  width: 100%;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 9px;
+  color: var(--ink);
+  background: #fff;
+}
+
+textarea:focus {
+  outline: 2px solid rgba(15, 118, 110, 0.2);
+  border-color: rgba(15, 118, 110, 0.5);
+}
+
+.composer-actions,
+.thread-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.threads {
+  display: grid;
+  gap: 12px;
+}
+
+.thread-card {
+  padding: 12px;
+}
+
+.thread-card.unanchored {
+  border-color: rgba(183, 121, 31, 0.34);
+  background: #fffaf0;
+}
+
+.thread-card.active {
+  border-color: rgba(15, 118, 110, 0.44);
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.08);
+}
+
+.thread-target {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  text-align: left;
+  color: var(--accent-strong);
+  font-weight: 700;
+}
+
+.thread-target span {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+
+.anchor-warning {
+  margin-top: 8px;
+  padding: 7px 8px;
+  border-radius: 6px;
+  background: rgba(251, 191, 36, 0.18);
+  color: #8a5a12;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.message {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #edf1ee;
+}
+
+.message p {
+  margin: 5px 0 0;
+  white-space: pre-wrap;
+  line-height: 1.45;
+}
+
+.message-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.reply-form {
+  margin-top: 12px;
+}
+
+.empty-state {
+  padding: 18px;
+  color: var(--muted);
+  text-align: center;
+}
+
+@media (max-width: 920px) {
+  .topbar {
+    height: auto;
+    align-items: flex-start;
+    padding: 12px;
+    flex-direction: column;
+  }
+
+  .document-path {
+    max-width: calc(100vw - 24px);
+  }
+
+  .toolbar {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .document-pane,
+  .comment-rail {
+    min-height: auto;
+  }
+
+  .document-pane {
+    padding: 12px;
+  }
+
+  .document-frame {
+    min-height: 62vh;
+  }
+
+  .comment-rail {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+}

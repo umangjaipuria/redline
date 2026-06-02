@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Redline</title>
+    <link rel="stylesheet" href="/style.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="document-meta">
+          <div class="app-name">Redline</div>
+          <div id="documentPath" class="document-path"></div>
+        </div>
+        <div class="toolbar" aria-label="Document actions">
+          <label class="author-control">
+            <span>Author</span>
+            <input id="authorName" type="text" autocomplete="name" spellcheck="false">
+          </label>
+          <span id="saveStatus" class="save-status" role="status">Loading</span>
+          <button id="reloadButton" type="button" class="ghost-button">Reload</button>
+          <button id="editButton" type="button" class="ghost-button">Edit</button>
+          <button id="commentButton" type="button" class="primary-button" disabled>Comment</button>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <section class="document-pane" aria-label="HTML document">
+          <div id="notice" class="notice" hidden>
+            <div>
+              <strong id="noticeTitle"></strong>
+              <p id="noticeBody"></p>
+            </div>
+            <button id="noticeAction" type="button" class="ghost-button">Reload</button>
+          </div>
+          <iframe
+            id="documentFrame"
+            class="document-frame"
+            title="Reviewed HTML document"
+            sandbox="allow-same-origin allow-forms allow-popups"
+          ></iframe>
+        </section>
+
+        <aside class="comment-rail" aria-label="Comment threads">
+          <section id="composer" class="composer" hidden>
+            <div class="rail-heading">New comment</div>
+            <blockquote id="selectedQuote"></blockquote>
+            <form id="commentForm">
+              <textarea id="commentBody" rows="4" placeholder="Add a comment"></textarea>
+              <div class="composer-actions">
+                <button id="cancelCommentButton" type="button" class="ghost-button">Cancel</button>
+                <button type="submit" class="primary-button">Post</button>
+              </div>
+            </form>
+          </section>
+
+          <div class="rail-summary">
+            <div>
+              <div class="rail-heading">Open threads</div>
+              <div id="threadCount" class="muted">0 comments</div>
+            </div>
+          </div>
+
+          <div id="threads" class="threads"></div>
+        </aside>
+      </main>
+    </div>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

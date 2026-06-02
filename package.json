@@ -1,0 +1,19 @@
+{
+  "name": "redline",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local HTML review workspace for browser and AI-agent collaboration.",
+  "scripts": {
+    "start": "bun src/server.ts",
+    "dev": "bun --watch src/server.ts",
+    "check": "bun test",
+    "agent:state": "bun src/agent.ts state",
+    "agent:reply": "bun src/agent.ts reply",
+    "agent:resolve": "bun src/agent.ts resolve",
+    "agent:apply": "bun src/agent.ts apply"
+  },
+  "engines": {
+    "bun": ">=1.3.0"
+  }
+}
