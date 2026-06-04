@@ -32,7 +32,7 @@ or an agent guide marker:
 <meta name="redline-agent-guide" content="...">
 ```
 
-If the local server is running, `.redline/server.json` contains the current URL and document path.
+If a local server is running, look in `~/.local/state/redline/servers/`. Each running server writes one `<pid>.json` file there containing `url`, `documentPath`, `pid`, and `startedAt`. This is a fixed per-user path, so any agent finds it regardless of its working directory. Pick the entry whose `documentPath` matches the file you are reviewing; if only one is present, use it. Ignore any entry whose `pid` is no longer alive (servers delete their file on a clean exit, but a hard kill can leave a stale one). The file is rewritten in place when that server switches documents, so `documentPath` always reflects what it is currently serving.
 
 ## Read Feedback
 
@@ -155,7 +155,7 @@ POST /api/agent/update                               # server twin of `apply` (b
 
 Note: the reply endpoint defaults the author to `User`, not `AI`, so pass `"author": "AI"` explicitly in the JSON body when an agent replies. The CLI `reply`/`comment` commands already default to `AI`.
 
-Use `.redline/server.json` to find the current server URL and document path.
+Use the `<pid>.json` files in `~/.local/state/redline/servers/` to find a running server's URL and document path (see [When To Use](#when-to-use) for how to pick among them). The directory is fixed and per-user, so it resolves the same way no matter which directory the agent runs in.
 
 ## Revise HTML
 

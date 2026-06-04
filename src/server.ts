@@ -5,6 +5,11 @@ import { fileURLToPath } from "node:url";
 import { handleAgentRequest } from "./agent-routes";
 import { handleCommentRequest } from "./comment-routes";
 import {
+  removeServerState as removeServerStateFile,
+  serverStatePath as serverStateFilePath,
+  writeServerState as writeServerStateFile,
+} from "./server-registry";
+import {
   applyAgentUpdate,
   openDocumentForReview,
   readDocumentState,
@@ -29,7 +34,16 @@ interface ServerRuntime {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.resolve(__dirname, "../public");
-const stateDir = path.resolve(process.cwd(), ".redline");
+// A fixed per-user location so any Claude Code instance can find the running
+// server(s) regardless of their working directory. Deliberately NOT honoring
+// $XDG_STATE_HOME: the whole point is a predictable path the agent skill can
+// name literally, and that env var is virtually never set in practice.
+const stateDir = path.join(os.homedir(), ".local", "state", "redline");
+// One file per running server, named by pid, so concurrent servers don't clobber
+// each other. Each owns and rewrites its own file and deletes it on exit; readers
+// (and new servers) prune entries whose pid is no longer alive. See server-registry.
+const serversDir = path.join(stateDir, "servers");
+const serverStartedAt = new Date().toISOString();
 const textEncoder = new TextEncoder();
 
 if (import.meta.main) {
@@ -71,12 +85,27 @@ function startServer(options: ServerOptions): void {
 
   runtime.serverUrl = server.url.toString();
   writeServerState(runtime.serverUrl, runtime.options.documentPath);
+  registerServerStateCleanup();
   runtime.latestVersion = openedState.version;
   setInterval(() => pollForExternalChanges(runtime), 750).unref?.();
 
   console.log(`Redline is serving ${runtime.options.documentPath}`);
   console.log(`Open ${server.url}`);
   console.log(`Agent state: ${new URL("/api/agent/state", server.url)}`);
+  console.log(`Server state: ${serverStateFilePath(serversDir, process.pid)}`);
+}
+
+// Delete this server's registry file on a clean exit. `exit` covers normal
+// returns and process.exit; the signal handlers turn Ctrl-C / termination into a
+// clean exit so the `exit` handler runs. Registered only when actually serving.
+function registerServerStateCleanup(): void {
+  process.once("exit", removeServerState);
+  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
+    process.once(signal, () => {
+      removeServerState();
+      process.exit(0);
+    });
+  }
 }
 
 function createRuntime(options: ServerOptions): ServerRuntime {
@@ -421,22 +450,14 @@ function isInside(parent: string, child: string): boolean {
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
+// Thin wrappers binding the registry helpers to this server's fixed directory,
+// pid, and start time. The registry logic itself lives in server-registry.ts.
 function writeServerState(url: string, documentPath: string): void {
-  fs.mkdirSync(stateDir, { recursive: true });
-  fs.writeFileSync(
-    path.join(stateDir, "server.json"),
-    `${JSON.stringify(
-      {
-        url,
-        documentPath,
-        pid: process.pid,
-        startedAt: new Date().toISOString(),
-      },
-      null,
-      2,
-    )}\n`,
-    "utf8",
-  );
+  writeServerStateFile(serversDir, { url, documentPath, pid: process.pid, startedAt: serverStartedAt });
+}
+
+function removeServerState(): void {
+  removeServerStateFile(serversDir, process.pid);
 }
 
 function parseArgs(args: string[]): ServerOptions {

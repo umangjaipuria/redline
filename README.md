@@ -149,7 +149,7 @@ curl -X POST http://127.0.0.1:7331/api/agent/update \
   -d @/tmp/redline-update.json
 ```
 
-The server writes its current URL and document path to `.redline/server.json`.
+The server writes its current URL and document path to `~/.local/state/redline/servers/<pid>.json` — a fixed per-user path, so any tool or agent can find the running server regardless of its working directory. Each running server gets its own pid-named file (so concurrent servers don't collide) and removes it on a clean exit; stale entries left by a hard kill are pruned by the next server to start.
 
 ## Check
 

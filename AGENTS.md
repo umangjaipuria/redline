@@ -36,7 +36,7 @@ Use the compact direct Bun helper when possible:
 bun src/agent.ts comments documents/draft.html
 ```
 
-If the server is running, `.redline/server.json` contains the current URL. The same compact comments state is available at:
+If a server is running, `~/.local/state/redline/servers/<pid>.json` contains its current URL and document path. Each running server writes one pid-named file there and deletes it on a clean exit; readers prune entries whose pid is no longer alive. This is a fixed per-user path, so it is found regardless of the working directory the server or an agent runs in. The same compact comments state is available at:
 
 ```text
 GET /api/agent/comments
