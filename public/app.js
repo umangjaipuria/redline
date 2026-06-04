@@ -42,6 +42,9 @@ let railAutoFollowPaused = false;
 let railProgrammaticScrollDepth = 0;
 let railRevealFrame = null;
 let railRevealTimer = null;
+let frameProgrammaticScrollDepth = 0;
+let frameProgrammaticScrollTimer = null;
+let frameProgrammaticScrollToken = 0;
 
 const RAIL_EDGE_PADDING = 16;
 
@@ -554,6 +557,10 @@ function setupFrame() {
   };
   const onFrameScroll = () => {
     if (!trackingActive) return;
+    if (frameProgrammaticScrollDepth > 0) {
+      syncFrameViewport();
+      return;
+    }
     railAutoFollowPaused = false;
     syncFrameViewport({ followRail: true });
   };
@@ -572,7 +579,7 @@ function setupFrame() {
     frameResizeObserver?.disconnect();
     frameResizeObserver = null;
   };
-  syncFrameViewport({ followRail: true });
+  syncFrameViewport();
 }
 
 function prepareHtmlForFrame(html) {
@@ -857,6 +864,11 @@ function cleanFrameHtml() {
     element.classList.remove("redline-editable-text", "coauthor-editable-text");
     element.removeAttribute("contenteditable");
     element.removeAttribute("spellcheck");
+  }
+
+  for (const element of clone.querySelectorAll("[data-redline-opened-details]")) {
+    element.removeAttribute("data-redline-opened-details");
+    element.removeAttribute("open");
   }
 
   removeEmptyClassAttributes(clone);
@@ -1174,11 +1186,33 @@ function getAuthorName() {
 }
 
 function sortedThreads() {
+  const liveOrder = threadLiveOrder();
   return [...(state?.threads ?? [])].sort((left, right) => {
-    const leftStart = left.anchor.textPosition?.start ?? Number.MAX_SAFE_INTEGER;
-    const rightStart = right.anchor.textPosition?.start ?? Number.MAX_SAFE_INTEGER;
+    const leftStart =
+      liveOrder.get(left.id) ?? left.anchor.textPosition?.start ?? Number.MAX_SAFE_INTEGER;
+    const rightStart =
+      liveOrder.get(right.id) ?? right.anchor.textPosition?.start ?? Number.MAX_SAFE_INTEGER;
     return leftStart - rightStart || left.createdAt.localeCompare(right.createdAt);
   });
+}
+
+function threadLiveOrder() {
+  const doc = frame.contentDocument;
+  const order = new Map();
+  if (!anchorStatusReady || !doc?.body) return order;
+
+  let index = 0;
+  const anchors = doc.body.querySelectorAll(
+    ".redline-highlight[data-thread-id], .coauthor-highlight[data-thread-id]",
+  );
+  for (const element of anchors) {
+    const threadId = element.getAttribute("data-thread-id");
+    if (threadId && !order.has(threadId)) {
+      order.set(threadId, index);
+      index += 1;
+    }
+  }
+  return order;
 }
 
 function renderThreads() {
@@ -1359,6 +1393,7 @@ function decodeHashFragment(value) {
 }
 
 function deselectThread() {
+  cancelFrameProgrammaticScroll();
   if (!activeThreadId) return;
   activeThreadId = null;
   for (const card of threadsEl.querySelectorAll(".thread-card.active")) {
@@ -1387,36 +1422,67 @@ function activateThreadWithoutRender(threadId) {
 }
 
 async function resolveComment(threadId) {
-  const response = await fetch(`/api/comments/${encodeURIComponent(threadId)}/resolve`, {
-    method: "POST",
-  });
-  if (!response.ok) {
-    const payload = await readJsonPayload(response);
-    showNotice("Resolve failed", payload.error || "Redline could not resolve this thread.");
-    updateToolbar();
-    return;
+  const endLocalMutation = beginLocalMutation();
+  try {
+    const response = await fetch(`/api/comments/${encodeURIComponent(threadId)}/resolve`, {
+      method: "POST",
+    });
+    if (!response.ok) {
+      const payload = await readJsonPayload(response);
+      showNotice("Resolve failed", payload.error || "Redline could not resolve this thread.");
+      updateToolbar();
+      return;
+    }
+    state = await response.json();
+    removeThreadFromFrame(threadId);
+    if (activeThreadId === threadId) activeThreadId = null;
+    render({ preserveFrame: true });
+  } finally {
+    endLocalMutation();
   }
-  state = await response.json();
-  if (activeThreadId === threadId) activeThreadId = null;
-  render();
 }
 
 async function deleteReply(threadId, messageId) {
-  const response = await fetch(
-    `/api/comments/${encodeURIComponent(threadId)}/replies/${encodeURIComponent(messageId)}`,
-    { method: "DELETE" },
-  );
+  const endLocalMutation = beginLocalMutation();
+  try {
+    const response = await fetch(
+      `/api/comments/${encodeURIComponent(threadId)}/replies/${encodeURIComponent(messageId)}`,
+      { method: "DELETE" },
+    );
 
-  if (!response.ok) {
-    const payload = await readJsonPayload(response);
-    showNotice("Reply delete failed", payload.error || "Redline could not delete this reply.");
-    updateToolbar();
-    return;
+    if (!response.ok) {
+      const payload = await readJsonPayload(response);
+      showNotice("Reply delete failed", payload.error || "Redline could not delete this reply.");
+      updateToolbar();
+      return;
+    }
+
+    state = await response.json();
+    activeThreadId = threadId;
+    render({ preserveFrame: true });
+  } finally {
+    endLocalMutation();
   }
+}
 
-  state = await response.json();
-  activeThreadId = threadId;
-  render();
+function removeThreadFromFrame(threadId) {
+  const doc = frame.contentDocument;
+  if (!doc?.body) return;
+
+  const escapedThreadId = attributeValue(threadId);
+  const selector = [
+    `.redline-highlight[data-thread-id="${escapedThreadId}"]`,
+    `.coauthor-highlight[data-thread-id="${escapedThreadId}"]`,
+    `[data-redline-anchor="${escapedThreadId}"]`,
+    `[data-coauthor-anchor="${escapedThreadId}"]`,
+  ].join(",");
+
+  for (const element of doc.querySelectorAll(selector)) {
+    if (element.isConnected) {
+      unwrapElement(element);
+    }
+  }
+  anchoredThreadIds.delete(threadId);
 }
 
 function applyHighlights() {
@@ -1601,7 +1667,40 @@ function scrollToThreadAnchor(threadId) {
   const anchor = doc?.querySelector(
     `.redline-highlight[data-thread-id="${escapedThreadId}"], .coauthor-highlight[data-thread-id="${escapedThreadId}"]`,
   );
-  anchor?.scrollIntoView({ block: "center", behavior: "smooth" });
+  if (!anchor) return;
+
+  openAncestorDetails(anchor);
+  frameProgrammaticScrollToken += 1;
+  const token = frameProgrammaticScrollToken;
+  frameProgrammaticScrollDepth = 1;
+  clearTimeout(frameProgrammaticScrollTimer);
+  anchor.scrollIntoView({ block: "center", behavior: "smooth" });
+  frameProgrammaticScrollTimer = window.setTimeout(() => {
+    if (token !== frameProgrammaticScrollToken) return;
+    frameProgrammaticScrollDepth = 0;
+    frameProgrammaticScrollTimer = null;
+    if (activeThreadId !== threadId) {
+      activateThreadWithoutRender(threadId);
+    }
+  }, 1400);
+}
+
+function cancelFrameProgrammaticScroll() {
+  frameProgrammaticScrollToken += 1;
+  frameProgrammaticScrollDepth = 0;
+  clearTimeout(frameProgrammaticScrollTimer);
+  frameProgrammaticScrollTimer = null;
+}
+
+function openAncestorDetails(element) {
+  let current = element.parentElement;
+  while (current) {
+    if (current.tagName === "DETAILS" && !current.hasAttribute("open")) {
+      current.setAttribute("data-redline-opened-details", "true");
+      current.setAttribute("open", "");
+    }
+    current = current.parentElement;
+  }
 }
 
 function updateToolbar() {

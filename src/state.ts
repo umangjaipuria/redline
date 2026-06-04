@@ -113,7 +113,7 @@ const agentGuideMetaPattern =
 const agentGuideCommentPattern = /<!--\s*redline-agent-guide:/i;
 
 export function defaultDocumentPath(cwd = process.cwd()): string {
-  return path.join(cwd, "documents", "sample.html");
+  return path.join(cwd, "documents", "howto.html");
 }
 
 export function resolveDocumentPath(input?: string, cwd = process.cwd()): string {

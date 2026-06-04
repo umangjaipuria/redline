@@ -518,7 +518,7 @@ function printHelp(): void {
   bun run start -- [document.html] [--port 7331] [--host 127.0.0.1]
   bun run start -- [document.html] -p 8099
 
-The server creates documents/sample.html when no document path is provided.
+The server creates documents/howto.html when no document path is provided.
 Agent-readable state is available at /api/agent/state and in embedded review
 JSON inside the HTML file.`);
 }

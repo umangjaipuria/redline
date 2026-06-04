@@ -268,7 +268,7 @@
         }
       }
     </style>
-  <script type="application/json" id="redline-state">{"schemaVersion":1,"updatedAt":"2026-06-02T19:45:13.137Z","threads":[{"id":"thread_demo_lede","anchor":{"type":"text-range","anchorId":"thread_demo_lede","quote":"review HTML locally with comments","prefix":"","suffix":""},"quote":"review HTML locally with comments","author":"user","createdAt":"2026-06-02T16:00:00.000Z","updatedAt":"2026-06-02T19:45:13.137Z","messages":[{"id":"msg_demo_1","author":"user","body":"Each comment sits level with the text it points at - like notes in a margin.","createdAt":"2026-06-02T16:00:00.000Z"}]},{"id":"thread_demo_anchor","anchor":{"type":"text-range","anchorId":"thread_demo_anchor","quote":"data-redline-anchor spans","prefix":"","suffix":""},"quote":"data-redline-anchor spans","author":"ai","createdAt":"2026-06-02T16:01:00.000Z","updatedAt":"2026-06-02T16:01:00.000Z","messages":[{"id":"msg_demo_2","author":"ai","body":"When two anchors sit close together, their cards pack so they do not overlap.","createdAt":"2026-06-02T16:01:00.000Z"}]},{"id":"thread_demo_resolve","anchor":{"type":"text-range","anchorId":"thread_demo_resolve","quote":"resolve completed threads","prefix":"","suffix":""},"quote":"resolve completed threads","author":"user","createdAt":"2026-06-02T16:02:00.000Z","updatedAt":"2026-06-02T16:02:00.000Z","messages":[{"id":"msg_demo_3","author":"user","body":"Click a comment (or the highlighted text) and it springs to its anchor and lights up.","createdAt":"2026-06-02T16:02:00.000Z"}]}]}</script>
+  <script type="application/json" id="redline-state">{"schemaVersion":1,"updatedAt":"2026-06-02T19:45:13.137Z","threads":[{"id":"thread_demo_lede","anchor":{"type":"text-range","anchorId":"thread_demo_lede","quote":"review HTML locally with comments","prefix":"","suffix":""},"quote":"review HTML locally with comments","author":"User","createdAt":"2026-06-02T16:00:00.000Z","updatedAt":"2026-06-02T19:45:13.137Z","messages":[{"id":"msg_demo_1","author":"User","body":"Each comment sits level with the text it points at - like notes in a margin.","createdAt":"2026-06-02T16:00:00.000Z"}]},{"id":"thread_demo_anchor","anchor":{"type":"text-range","anchorId":"thread_demo_anchor","quote":"data-redline-anchor spans","prefix":"","suffix":""},"quote":"data-redline-anchor spans","author":"User","createdAt":"2026-06-02T16:01:00.000Z","updatedAt":"2026-06-02T16:01:00.000Z","messages":[{"id":"msg_demo_2","author":"User","body":"When two anchors sit close together, their cards pack so they do not overlap.","createdAt":"2026-06-02T16:01:00.000Z"}]},{"id":"thread_demo_resolve","anchor":{"type":"text-range","anchorId":"thread_demo_resolve","quote":"resolve completed threads","prefix":"","suffix":""},"quote":"resolve completed threads","author":"User","createdAt":"2026-06-02T16:02:00.000Z","updatedAt":"2026-06-02T16:02:00.000Z","messages":[{"id":"msg_demo_3","author":"User","body":"Click a comment (or the highlighted text) and it springs to its anchor and lights up.","createdAt":"2026-06-02T16:02:00.000Z"}]}]}</script>
   </head>
   <body>
     <main>
@@ -303,7 +303,7 @@
         <section>
           <h2>For reviewers</h2>
           <ol>
-            <li>Open the app with <code>bun run start -- documents/sample.html</code>, then visit the printed localhost URL.</li>
+            <li>Open the app with <code>bun run start -- documents/howto.html</code>, then visit the printed localhost URL.</li>
             <li>Put your name in the top bar so new comments and replies are attributed correctly.</li>
             <li>Select text in the document, click the floating comment button, and write the note.</li>
             <li>Click a highlighted phrase or comment card to line the two up in the margin.</li>
@@ -317,11 +317,11 @@
 
         <section>
           <h2>Run commands</h2>
-          <pre><code>bun run start -- documents/sample.html
-bun run start -- documents/sample.html --port 7332
+          <pre><code>bun run start -- documents/howto.html
+bun run start -- documents/howto.html --port 7332
 bun run check</code></pre>
           <p>
-            If no path is provided, Redline creates and opens <code>documents/sample.html</code>. The server also writes
+            If no path is provided, Redline creates and opens <code>documents/howto.html</code>. The server also writes
             its current URL and document path to <code>.redline/server.json</code>.
           </p>
         </section>
@@ -334,14 +334,14 @@ bun run check</code></pre>
           when you need the HTML, preserve unresolved anchors while revising, reply to the relevant threads, and
           <span data-redline-anchor="thread_demo_resolve">resolve completed threads</span> only after the requested work is done.
         </p>
-        <pre><code>bun src/agent.ts comments documents/sample.html
-bun src/agent.ts file documents/sample.html
-bun src/agent.ts comment documents/sample.html "exact quoted text" "This needs a source." --author AI
-bun src/agent.ts comment documents/sample.html "exact quoted text" "This second mention needs a source." --occurrence 2 --author AI
-bun src/agent.ts reply documents/sample.html thread_abc123 "I revised this section." --author AI
-bun src/agent.ts delete-reply documents/sample.html thread_abc123 message_reply456
-bun src/agent.ts resolve documents/sample.html thread_abc123
-bun src/agent.ts apply documents/sample.html /tmp/redline-update.json</code></pre>
+        <pre><code>bun src/agent.ts comments documents/howto.html
+bun src/agent.ts file documents/howto.html
+bun src/agent.ts comment documents/howto.html "exact quoted text" "This needs a source." --author AI
+bun src/agent.ts comment documents/howto.html "exact quoted text" "This second mention needs a source." --occurrence 2 --author AI
+bun src/agent.ts reply documents/howto.html thread_abc123 "I revised this section." --author AI
+bun src/agent.ts delete-reply documents/howto.html thread_abc123 message_reply456
+bun src/agent.ts resolve documents/howto.html thread_abc123
+bun src/agent.ts apply documents/howto.html /tmp/redline-update.json</code></pre>
         <div class="badge-row" aria-label="Agent principles">
           <span class="badge">Read before editing</span>
           <span class="badge">Create top-level threads</span>
@@ -357,7 +357,7 @@ bun src/agent.ts apply documents/sample.html /tmp/redline-update.json</code></pr
           Use <code>comment</code> when proofreading or reviewing without editing directly. It creates the first message in a
           new thread anchored to existing text; use <code>reply</code> only when responding inside a thread that already exists.
         </p>
-        <pre><code>bun src/agent.ts comment documents/sample.html "claim to review" "Please add a source." --author AI</code></pre>
+        <pre><code>bun src/agent.ts comment documents/howto.html "claim to review" "Please add a source." --author AI</code></pre>
         <div class="callout blue">
           <strong>Repeated text</strong>
           If the anchor text appears more than once, Redline will not guess. Pass <code>--occurrence N</code>, where
@@ -417,6 +417,7 @@ bun src/agent.ts apply documents/sample.html /tmp/redline-update.json</code></pr
           <ul class="two-column-list">
             <li>If a save pauses, reload before continuing so edits do not overwrite a newer file.</li>
             <li>If an anchor warning appears, the text changed but the thread stayed open for review.</li>
+            <li>If an anchor is inside a closed <code>&lt;details&gt;</code> block, selecting the thread opens that disclosure temporarily; custom hidden panels may need a manual reveal path.</li>
             <li>If quoted text appears more than once, use <code>--occurrence</code> instead of relying on a first match.</li>
             <li>If the browser is closed, agents can still use the direct Bun helper commands.</li>
             <li>If a file will not open, confirm it exists and ends in <code>.html</code> or <code>.htm</code>.</li>

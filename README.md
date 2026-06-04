@@ -27,12 +27,12 @@ Resolved threads are deleted from that embedded state and their inline anchors a
 ## Run
 
 ```bash
-bun run start -- documents/sample.html
+bun run start -- documents/howto.html
 ```
 
 Then open the printed localhost URL in any browser.
 
-If you omit the document path, Redline creates and opens `documents/sample.html`.
+If you omit the document path, Redline creates and opens `documents/howto.html`.
 
 ```bash
 bun run start
@@ -41,13 +41,13 @@ bun run start
 Use another port when needed:
 
 ```bash
-bun run start -- documents/sample.html --port 7332
+bun run start -- documents/howto.html --port 7332
 ```
 
 Short form:
 
 ```bash
-bun run start -- documents/sample.html -p 8099
+bun run start -- documents/howto.html -p 8099
 ```
 
 ## Browser Workflow
@@ -68,49 +68,49 @@ When an agent rewrites anchored text, it should preserve or move the surrounding
 Read comments without loading the full HTML:
 
 ```bash
-bun src/agent.ts comments documents/sample.html
+bun src/agent.ts comments documents/howto.html
 ```
 
 Get the current file path when you need to read or edit the HTML:
 
 ```bash
-bun src/agent.ts file documents/sample.html
+bun src/agent.ts file documents/howto.html
 ```
 
 Leave a new top-level comment thread anchored to existing text:
 
 ```bash
-bun src/agent.ts comment documents/sample.html "exact quoted text" "This needs a source." --author AI
+bun src/agent.ts comment documents/howto.html "exact quoted text" "This needs a source." --author AI
 ```
 
 If the quoted text appears more than once, choose the 1-based occurrence in document order:
 
 ```bash
-bun src/agent.ts comment documents/sample.html "exact quoted text" "This second mention needs a source." --occurrence 2 --author AI
+bun src/agent.ts comment documents/howto.html "exact quoted text" "This second mention needs a source." --occurrence 2 --author AI
 ```
 
 Reply to a comment thread:
 
 ```bash
-bun src/agent.ts reply documents/sample.html thread_abc123 "I updated this section." --author AI
+bun src/agent.ts reply documents/howto.html thread_abc123 "I updated this section." --author AI
 ```
 
 Delete one reply without deleting the whole thread:
 
 ```bash
-bun src/agent.ts delete-reply documents/sample.html thread_abc123 message_reply456
+bun src/agent.ts delete-reply documents/howto.html thread_abc123 message_reply456
 ```
 
 Resolve a completed thread:
 
 ```bash
-bun src/agent.ts resolve documents/sample.html thread_abc123
+bun src/agent.ts resolve documents/howto.html thread_abc123
 ```
 
 Apply an HTML update and comment replies together:
 
 ```bash
-bun src/agent.ts apply documents/sample.html /tmp/redline-update.json
+bun src/agent.ts apply documents/howto.html /tmp/redline-update.json
 ```
 
 Payload shape:

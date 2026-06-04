@@ -90,6 +90,12 @@ A thread highlights in two ways, and you can rely on either:
 
 So a comment created with a unique quote, or with a quote plus `textPosition`, will still show up highlighted; you do not have to hand-wrap a span for the comment to be visible. Hand-wrap a span only when you want the anchor to stay put across later text edits. The comment helpers (`comment`, `apply`, `POST /api/comments`) do **not** insert the span for you; they only record the thread.
 
+### Hidden anchor edge cases
+
+Anchors can live inside native HTML disclosure widgets such as closed `<details>` blocks. In the browser, selecting the thread should temporarily open any closed ancestor `<details>` before scrolling to the anchor; that runtime-opened state is removed before saving so the source document does not gain an unintended `open` attribute.
+
+If a user reports a missing anchor, inspect the HTML for the thread's `data-redline-anchor` first. If the span exists inside a closed `<details>`, the comment is still anchored; the browser just needs to reveal the disclosure. Redline can do this generically for native `<details>`, but not for arbitrary custom accordions, `display:none` regions, or JavaScript-driven panels with document scripts disabled. For those custom hiding patterns, keep the anchor span intact and explain that the document needs a manual or document-specific reveal path.
+
 ### Thread and anchor ids
 
 Thread ids and `anchorId` values must match `^thread_[A-Za-z0-9_-]{1,128}$` — they must start with `thread_`. The CLI validates explicit ids. Lower-level state/API paths normalize invalid ids, which can break alignment with a span you wrote by hand. Always prefix your ids with `thread_`.

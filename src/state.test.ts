@@ -40,10 +40,10 @@ function tempDocument() {
 test("resolves default and explicit document paths", () => {
   const cwd = path.join(os.tmpdir(), "workspace");
 
-  expect(defaultDocumentPath(cwd)).toBe(path.join(cwd, "documents", "sample.html"));
-  expect(resolveDocumentPath(undefined, cwd)).toBe(path.join(cwd, "documents", "sample.html"));
+  expect(defaultDocumentPath(cwd)).toBe(path.join(cwd, "documents", "howto.html"));
+  expect(resolveDocumentPath(undefined, cwd)).toBe(path.join(cwd, "documents", "howto.html"));
   expect(resolveDocumentPath("docs/draft.html", cwd)).toBe(path.join(cwd, "docs/draft.html"));
-  expect(resolveDocumentPath("   ", cwd)).toBe(path.join(cwd, "documents", "sample.html"));
+  expect(resolveDocumentPath("   ", cwd)).toBe(path.join(cwd, "documents", "howto.html"));
   expect(resolveDocumentPath("/tmp/draft.html", cwd)).toBe("/tmp/draft.html");
 });
 

@@ -39,10 +39,10 @@ test("font stylesheet references existing local assets", () => {
   }
 });
 
-test("sample HOWTO keeps embedded Redline anchors aligned", () => {
-  const samplePath = path.join(projectRoot, "documents", "sample.html");
-  const html = readProjectFile("documents/sample.html");
-  const state = readDocumentState(samplePath);
+test("HOWTO keeps embedded Redline anchors aligned", () => {
+  const howtoPath = path.join(projectRoot, "documents", "howto.html");
+  const html = readProjectFile("documents/howto.html");
+  const state = readDocumentState(howtoPath);
 
   expect(html).toContain("<h1>Redline HOWTO</h1>");
   expect(state.threads).toHaveLength(3);
