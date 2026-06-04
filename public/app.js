@@ -1,3 +1,11 @@
+import {
+  collectThreadLiveOrderFromAnchors,
+  createProgrammaticScrollGuard,
+  openAncestorDetails,
+  removeRuntimeOpenedDetails,
+  sortThreadsForRail,
+} from "./app-helpers.js";
+
 const frame = document.querySelector("#documentFrame");
 const documentPathEl = document.querySelector("#documentPath");
 const saveStatusEl = document.querySelector("#saveStatus");
@@ -42,11 +50,16 @@ let railAutoFollowPaused = false;
 let railProgrammaticScrollDepth = 0;
 let railRevealFrame = null;
 let railRevealTimer = null;
-let frameProgrammaticScrollDepth = 0;
-let frameProgrammaticScrollTimer = null;
-let frameProgrammaticScrollToken = 0;
 
 const RAIL_EDGE_PADDING = 16;
+
+const frameScrollGuard = createProgrammaticScrollGuard({
+  onRestore: (threadId) => {
+    if (activeThreadId !== threadId) {
+      activateThreadWithoutRender(threadId);
+    }
+  },
+});
 
 authorNameInput.value = getStoredAuthorName();
 
@@ -557,7 +570,7 @@ function setupFrame() {
   };
   const onFrameScroll = () => {
     if (!trackingActive) return;
-    if (frameProgrammaticScrollDepth > 0) {
+    if (frameScrollGuard.isActive()) {
       syncFrameViewport();
       return;
     }
@@ -866,10 +879,7 @@ function cleanFrameHtml() {
     element.removeAttribute("spellcheck");
   }
 
-  for (const element of clone.querySelectorAll("[data-redline-opened-details]")) {
-    element.removeAttribute("data-redline-opened-details");
-    element.removeAttribute("open");
-  }
+  removeRuntimeOpenedDetails(clone);
 
   removeEmptyClassAttributes(clone);
 
@@ -1186,33 +1196,13 @@ function getAuthorName() {
 }
 
 function sortedThreads() {
-  const liveOrder = threadLiveOrder();
-  return [...(state?.threads ?? [])].sort((left, right) => {
-    const leftStart =
-      liveOrder.get(left.id) ?? left.anchor.textPosition?.start ?? Number.MAX_SAFE_INTEGER;
-    const rightStart =
-      liveOrder.get(right.id) ?? right.anchor.textPosition?.start ?? Number.MAX_SAFE_INTEGER;
-    return leftStart - rightStart || left.createdAt.localeCompare(right.createdAt);
-  });
+  return sortThreadsForRail(state?.threads ?? [], threadLiveOrder());
 }
 
 function threadLiveOrder() {
   const doc = frame.contentDocument;
-  const order = new Map();
-  if (!anchorStatusReady || !doc?.body) return order;
-
-  let index = 0;
-  const anchors = doc.body.querySelectorAll(
-    ".redline-highlight[data-thread-id], .coauthor-highlight[data-thread-id]",
-  );
-  for (const element of anchors) {
-    const threadId = element.getAttribute("data-thread-id");
-    if (threadId && !order.has(threadId)) {
-      order.set(threadId, index);
-      index += 1;
-    }
-  }
-  return order;
+  if (!anchorStatusReady || !doc?.body) return new Map();
+  return collectThreadLiveOrderFromAnchors(doc.body);
 }
 
 function renderThreads() {
@@ -1393,7 +1383,7 @@ function decodeHashFragment(value) {
 }
 
 function deselectThread() {
-  cancelFrameProgrammaticScroll();
+  frameScrollGuard.cancel();
   if (!activeThreadId) return;
   activeThreadId = null;
   for (const card of threadsEl.querySelectorAll(".thread-card.active")) {
@@ -1670,37 +1660,8 @@ function scrollToThreadAnchor(threadId) {
   if (!anchor) return;
 
   openAncestorDetails(anchor);
-  frameProgrammaticScrollToken += 1;
-  const token = frameProgrammaticScrollToken;
-  frameProgrammaticScrollDepth = 1;
-  clearTimeout(frameProgrammaticScrollTimer);
+  frameScrollGuard.begin(threadId);
   anchor.scrollIntoView({ block: "center", behavior: "smooth" });
-  frameProgrammaticScrollTimer = window.setTimeout(() => {
-    if (token !== frameProgrammaticScrollToken) return;
-    frameProgrammaticScrollDepth = 0;
-    frameProgrammaticScrollTimer = null;
-    if (activeThreadId !== threadId) {
-      activateThreadWithoutRender(threadId);
-    }
-  }, 1400);
-}
-
-function cancelFrameProgrammaticScroll() {
-  frameProgrammaticScrollToken += 1;
-  frameProgrammaticScrollDepth = 0;
-  clearTimeout(frameProgrammaticScrollTimer);
-  frameProgrammaticScrollTimer = null;
-}
-
-function openAncestorDetails(element) {
-  let current = element.parentElement;
-  while (current) {
-    if (current.tagName === "DETAILS" && !current.hasAttribute("open")) {
-      current.setAttribute("data-redline-opened-details", "true");
-      current.setAttribute("open", "");
-    }
-    current = current.parentElement;
-  }
 }
 
 function updateToolbar() {

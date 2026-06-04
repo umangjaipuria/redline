@@ -42,6 +42,14 @@ function agentRouter(documentPath: string) {
   return (request: Request) => handleAgentRequest(request, { documentPath });
 }
 
+function expectResponse(response: Response | undefined) {
+  expect(response).toBeDefined();
+  if (!response) {
+    throw new Error("Expected route response.");
+  }
+  return response;
+}
+
 test("GET /document-assets/ does not stream the document directory", async () => {
   const documentPath = tempDocument();
   const handler = createRequestHandler({ documentPath, host: "127.0.0.1", port: 0 });
@@ -59,9 +67,9 @@ test("GET /api/agent/comments returns comments without html", async () => {
     anchor: { type: "document" },
   });
 
-  const response = agentRouter(documentPath)(
+  const response = expectResponse(agentRouter(documentPath)(
     new Request("http://127.0.0.1/api/agent/comments"),
-  );
+  ));
   const payload = await response.json();
 
   expect(response.status).toBe(200);
@@ -78,9 +86,9 @@ test("GET /api/agent/file returns the current file path without html", async () 
     anchor: { type: "document" },
   });
 
-  const response = agentRouter(documentPath)(
+  const response = expectResponse(agentRouter(documentPath)(
     new Request("http://127.0.0.1/api/agent/file"),
-  );
+  ));
   const payload = await response.json();
 
   expect(response.status).toBe(200);
