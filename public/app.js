@@ -1360,6 +1360,12 @@ function renderThreads() {
           }
           ${messages}
           <div class="thread-foot">
+            <button type="button" class="icon-action" data-reply-toggle="${escapeHtml(thread.id)}" title="Reply" aria-label="Reply">
+              <svg class="btn-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M9.5 7 5 11.5 9.5 16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M5 11.5h8.5a5 5 0 0 1 5 5V18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
             ${
               canEditLastMessage && lastMessage
                 ? `
@@ -1375,12 +1381,6 @@ function renderThreads() {
                 `
                 : ""
             }
-            <button type="button" class="icon-action" data-reply-toggle="${escapeHtml(thread.id)}" title="Reply" aria-label="Reply">
-              <svg class="btn-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <path d="M9.5 7 5 11.5 9.5 16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-                <path d="M5 11.5h8.5a5 5 0 0 1 5 5V18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-            </button>
             <button type="button" class="icon-action danger" data-resolve-thread="${escapeHtml(thread.id)}" title="Delete comment" aria-label="Delete comment">
               <svg class="btn-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                 <path d="M5 7h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
