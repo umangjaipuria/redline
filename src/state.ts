@@ -98,10 +98,10 @@ const emptyReviewUpdatedAt = "1970-01-01T00:00:00.000Z";
 const embeddedStateScriptId = "redline-state";
 const agentGuideMetaName = "redline-agent-guide";
 const agentGuideMetaContent =
-  "Redline document. Agents: use the redline-review workflow; comments live in #redline-state and data-redline-anchor spans.";
+  "Redline document. Agents: use the redline-review skill; comments live in #redline-state and data-redline-anchor spans.";
 const agentGuideMetaTag = `<meta name="${agentGuideMetaName}" content="${agentGuideMetaContent}">`;
 const agentGuideComment =
-  "<!-- redline-agent-guide: use the redline-review workflow; comments live in #redline-state and data-redline-anchor spans. -->";
+  "<!-- redline-agent-guide: use the redline-review skill; comments live in #redline-state and data-redline-anchor spans. -->";
 const embeddedStateScriptPattern =
   /<script\b(?=[^>]*\bid\s*=\s*(["'])redline-state\1)(?=[^>]*\btype\s*=\s*(["'])application\/json\2)[^>]*>[\s\S]*?<\/script>\s*/i;
 const legacyEmbeddedStateScriptPattern =

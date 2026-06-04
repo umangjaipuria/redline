@@ -76,7 +76,7 @@ test("opening a document for review adds an agent discovery marker", () => {
 
   expect(opened.html).toContain('name="redline-agent-guide"');
   expect(html).toContain('name="redline-agent-guide"');
-  expect(html).toContain("use the redline-review workflow");
+  expect(html).toContain("use the redline-review skill");
 
   openDocumentForReview(documentPath);
   const afterSecondOpen = fs.readFileSync(documentPath, "utf8");
