@@ -273,7 +273,7 @@
         }
       }
     </style>
-  <script type="application/json" id="redline-state">{"schemaVersion":1,"updatedAt":"2026-06-02T19:45:13.137Z","threads":[{"id":"thread_demo_lede","anchor":{"type":"text-range","anchorId":"thread_demo_lede","quote":"review HTML locally with comments","prefix":"","suffix":""},"quote":"review HTML locally with comments","author":"User","createdAt":"2026-06-02T16:00:00.000Z","updatedAt":"2026-06-02T19:45:13.137Z","messages":[{"id":"msg_demo_1","author":"User","body":"Each comment sits level with the text it points at - like notes in a margin.","createdAt":"2026-06-02T16:00:00.000Z"}]},{"id":"thread_demo_anchor","anchor":{"type":"text-range","anchorId":"thread_demo_anchor","quote":"data-redline-anchor spans","prefix":"","suffix":""},"quote":"data-redline-anchor spans","author":"User","createdAt":"2026-06-02T16:01:00.000Z","updatedAt":"2026-06-02T16:01:00.000Z","messages":[{"id":"msg_demo_2","author":"User","body":"When two anchors sit close together, their cards pack so they do not overlap.","createdAt":"2026-06-02T16:01:00.000Z"}]},{"id":"thread_demo_resolve","anchor":{"type":"text-range","anchorId":"thread_demo_resolve","quote":"resolve completed threads","prefix":"","suffix":""},"quote":"resolve completed threads","author":"User","createdAt":"2026-06-02T16:02:00.000Z","updatedAt":"2026-06-02T16:02:00.000Z","messages":[{"id":"msg_demo_3","author":"User","body":"Click a comment (or the highlighted text) and it springs to its anchor and lights up.","createdAt":"2026-06-02T16:02:00.000Z"}]}]}</script>
+  <script type="application/json" id="redline-state">{"schemaVersion":1,"updatedAt":"2026-06-04T23:27:21.520Z","threads":[{"id":"thread_demo_lede","anchor":{"type":"text-range","anchorId":"thread_demo_lede","quote":"review HTML locally with comments","prefix":"","suffix":""},"quote":"review HTML locally with comments","author":"User","createdAt":"2026-06-02T16:00:00.000Z","updatedAt":"2026-06-04T23:27:01.821Z","messages":[{"id":"msg_demo_1","author":"User","body":"Each comment sits level with the text it points at - like notes in a margin.","createdAt":"2026-06-02T16:00:00.000Z"},{"id":"message_323f28cf75364012","author":"AI","body":"And an agent's reply threads right under your comment, tagged with its name.","createdAt":"2026-06-04T23:27:01.821Z"}]},{"id":"thread_demo_anchor","anchor":{"type":"text-range","anchorId":"thread_demo_anchor","quote":"data-redline-anchor spans","prefix":"","suffix":""},"quote":"data-redline-anchor spans","author":"User","createdAt":"2026-06-02T16:01:00.000Z","updatedAt":"2026-06-02T16:01:00.000Z","messages":[{"id":"msg_demo_2","author":"User","body":"When two anchors sit close together, their cards pack so they do not overlap.","createdAt":"2026-06-02T16:01:00.000Z"}]},{"id":"thread_demo_resolve","anchor":{"type":"text-range","anchorId":"thread_demo_resolve","quote":"resolve completed threads","prefix":"","suffix":""},"quote":"resolve completed threads","author":"User","createdAt":"2026-06-02T16:02:00.000Z","updatedAt":"2026-06-04T23:27:01.797Z","messages":[{"id":"msg_demo_3","author":"User","body":"Click a comment (or the highlighted text) and it springs to its anchor and lights up.","createdAt":"2026-06-02T16:02:00.000Z"}]},{"id":"thread_7e17b1cfd4844aec","anchor":{"type":"text-range","quote":"click the floating comment button","prefix":"your name in the top bar so new comments and replies are attributed correctly.\n            Select text in the document, ","suffix":", and write the note.\n            Click a highlighted phrase or comment card to line the two up in the margin.\n         ","textPosition":{"start":1025,"end":1058}},"quote":"click the floating comment button","author":"User","createdAt":"2026-06-04T23:27:21.520Z","updatedAt":"2026-06-04T23:27:21.520Z","messages":[{"id":"message_a9851f0be8934cb0","author":"User","body":"This is the main thing I do here — quick to leave a note.","createdAt":"2026-06-04T23:27:21.520Z"}]}]}</script>
   </head>
   <body>
     <main>
@@ -295,7 +295,7 @@
           </div>
           <div>
             <strong>3. Revise</strong>
-            <span>Edit in the browser or ask an agent to apply changes.</span>
+            <span>Ask your agent to revise the document and reply to each thread.</span>
           </div>
           <div>
             <strong>4. Resolve</strong>
@@ -308,7 +308,7 @@
         <section>
           <h2>For reviewers</h2>
           <ol>
-            <li>Open the app with <code>bun run start -- documents/howto.html</code>, then visit the printed localhost URL.</li>
+            <li>Open the app with <code>bun run start documents/howto.html</code>, then visit the printed localhost URL.</li>
             <li>Put your name in the top bar so new comments and replies are attributed correctly.</li>
             <li>Select text in the document, click the floating comment button, and write the note.</li>
             <li>Click a highlighted phrase or comment card to line the two up in the margin.</li>
@@ -322,8 +322,8 @@
 
         <section>
           <h2>Run commands</h2>
-          <pre><code>bun run start -- documents/howto.html
-bun run start -- documents/howto.html --port 7332
+          <pre><code>bun run start documents/howto.html
+bun run start documents/howto.html --port 7332
 bun run check</code></pre>
           <p>
             If no path is provided, Redline creates and opens <code>documents/howto.html</code>. The server also writes
