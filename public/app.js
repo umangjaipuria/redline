@@ -70,6 +70,7 @@ reloadButton.addEventListener("click", () => loadState({ force: true }));
 noticeAction.addEventListener("click", () => loadState({ force: true }));
 authorNameInput.addEventListener("input", () => {
   localStorage.setItem("redline.authorName", getAuthorName());
+  renderThreads();
 });
 editButton.addEventListener("click", () => {
   editMode = !editMode;
@@ -101,13 +102,13 @@ cancelCommentButton.addEventListener("click", () => closeComposer({ discardDraft
 commentBody.addEventListener("keydown", submitFormOnCommandEnter);
 document.addEventListener("pointerdown", (event) => {
   const target = elementFromEventTarget(event.target);
-  if (target?.closest?.(".reply-form")) return;
+  if (target?.closest?.(".reply-form, .message-edit-form")) return;
   closeEmptyReplyForms({ ignoreFocus: true });
   deselectThreadIfOutsideComment(target);
 });
 document.addEventListener("focusin", (event) => {
   const target = elementFromEventTarget(event.target);
-  if (target?.closest?.(".reply-form")) return;
+  if (target?.closest?.(".reply-form, .message-edit-form")) return;
   closeEmptyReplyForms();
   deselectThreadIfOutsideComment(target);
 });
@@ -175,6 +176,21 @@ threadsEl.addEventListener("click", async (event) => {
   const target = event.target;
   if (!(target instanceof Element)) return;
 
+  const editCancelButton = target.closest("[data-edit-cancel]");
+  if (editCancelButton instanceof HTMLElement) {
+    const form = editCancelButton.closest(".message-edit-form");
+    if (form instanceof HTMLFormElement) closeMessageEditForm(form);
+    return;
+  }
+
+  const editMessageButton = target.closest("[data-edit-message]");
+  if (editMessageButton instanceof HTMLElement) {
+    const threadId = editMessageButton.getAttribute("data-edit-thread");
+    const messageId = editMessageButton.getAttribute("data-edit-message");
+    if (threadId && messageId) openMessageEditForm(threadId, messageId);
+    return;
+  }
+
   const deleteReplyButton = target.closest("[data-delete-reply-message]");
   if (deleteReplyButton instanceof HTMLElement) {
     const threadId = deleteReplyButton.getAttribute("data-delete-reply-thread");
@@ -201,7 +217,7 @@ threadsEl.addEventListener("click", async (event) => {
   const threadId = threadCard?.getAttribute("data-thread-id");
   if (!threadId) return;
 
-  if (target.closest(".reply-form textarea, .reply-form button")) {
+  if (target.closest(".reply-form textarea, .reply-form button, .message-edit-form textarea, .message-edit-form button")) {
     activateThreadWithoutRender(threadId);
     return;
   }
@@ -212,7 +228,7 @@ threadsEl.addEventListener("click", async (event) => {
 threadsEl.addEventListener("keydown", (event) => {
   const target = event.target;
   if (!(target instanceof HTMLTextAreaElement)) return;
-  if (!target.closest(".reply-form")) return;
+  if (!target.closest(".reply-form, .message-edit-form")) return;
   submitFormOnCommandEnter(event);
 });
 
@@ -229,6 +245,12 @@ threadsEl.addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = event.target;
   if (!(form instanceof HTMLFormElement)) return;
+
+  if (form.matches(".message-edit-form")) {
+    await submitMessageEditForm(form);
+    return;
+  }
+
   const threadId = form.getAttribute("data-reply-form");
   const input = form.querySelector("textarea");
   const body = input?.value.trim() ?? "";
@@ -1207,6 +1229,7 @@ function threadLiveOrder() {
 
 function renderThreads() {
   const threads = sortedThreads();
+  const currentAuthor = getAuthorName();
 
   if (threads.length === 0) {
     // The rail only shows at all when there's a thread or an open composer, so
@@ -1222,10 +1245,13 @@ function renderThreads() {
         anchorStatusReady &&
         thread.anchor.type === "text-range" &&
         !anchoredThreadIds.has(thread.id);
+      const lastMessage = thread.messages.at(-1);
+      const canEditLastMessage =
+        Boolean(lastMessage) && lastMessage.author.trim() === currentAuthor;
       const messages = thread.messages
         .map(
           (message, messageIndex) => `
-            <div class="message">
+            <div class="message" data-message-id="${escapeHtml(message.id)}">
               <div class="message-meta">
                 <span>${escapeHtml(message.author)}</span>
                 <div class="message-meta-actions">
@@ -1248,7 +1274,26 @@ function renderThreads() {
                   }
                 </div>
               </div>
-              <p>${escapeHtml(message.body)}</p>
+              <p class="message-body">${escapeHtml(message.body)}</p>
+              <form class="message-edit-form"
+                data-edit-form-thread="${escapeHtml(thread.id)}"
+                data-edit-form-message="${escapeHtml(message.id)}"
+                hidden>
+                <textarea rows="3">${escapeHtml(message.body)}</textarea>
+                <div class="message-edit-actions">
+                  <button type="button" class="message-edit-control" data-edit-cancel
+                    title="Cancel edit" aria-label="Cancel edit">
+                    <svg class="btn-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <path d="M6.5 6.5 17.5 17.5M17.5 6.5 6.5 17.5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>
+                    </svg>
+                  </button>
+                  <button type="submit" class="message-edit-control confirm" title="Save edit" aria-label="Save edit">
+                    <svg class="btn-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <path d="m5 12.5 4.2 4.2L19 6.8" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                  </button>
+                </div>
+              </form>
             </div>
           `,
         )
@@ -1263,6 +1308,21 @@ function renderThreads() {
           }
           ${messages}
           <div class="thread-foot">
+            ${
+              canEditLastMessage && lastMessage
+                ? `
+                  <button type="button" class="icon-action"
+                    data-edit-thread="${escapeHtml(thread.id)}"
+                    data-edit-message="${escapeHtml(lastMessage.id)}"
+                    title="Edit comment" aria-label="Edit comment">
+                    <svg class="btn-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <path d="M14.5 5.5 18.5 9.5 8.5 19.5 4 20.5 5 16z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+                      <path d="M13 7 17 11" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                    </svg>
+                  </button>
+                `
+                : ""
+            }
             <button type="button" class="icon-action" data-reply-toggle="${escapeHtml(thread.id)}" title="Reply" aria-label="Reply">
               <svg class="btn-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                 <path d="M9.5 7 5 11.5 9.5 16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
@@ -1299,6 +1359,7 @@ function renderThreads() {
 // Reveal a thread's reply box (hidden by default to keep cards compact), focus
 // it, and make that thread active.
 function openReplyForThread(threadId) {
+  closeMessageEditForms();
   const card = threadsEl.querySelector(`.thread-card[data-thread-id="${cssEscape(threadId)}"]`);
   const form = card?.querySelector(".reply-form");
   if (!form) return;
@@ -1306,6 +1367,87 @@ function openReplyForThread(threadId) {
   activateThreadWithoutRender(threadId);
   layoutRail();
   form.querySelector("textarea")?.focus();
+}
+
+function openMessageEditForm(threadId, messageId) {
+  closeMessageEditForms();
+  closeEmptyReplyForms({ ignoreFocus: true });
+
+  const card = threadsEl.querySelector(`.thread-card[data-thread-id="${cssEscape(threadId)}"]`);
+  const message = card?.querySelector(`.message[data-message-id="${cssEscape(messageId)}"]`);
+  const form = message?.querySelector(".message-edit-form");
+  const body = message?.querySelector(".message-body");
+  if (!(form instanceof HTMLFormElement) || !(body instanceof HTMLElement)) return;
+
+  form.hidden = false;
+  body.hidden = true;
+  card.classList.add("editing-message");
+  activateThreadWithoutRender(threadId);
+  layoutRail();
+
+  const textarea = form.querySelector("textarea");
+  textarea?.focus();
+  textarea?.select();
+}
+
+function closeMessageEditForms() {
+  for (const form of threadsEl.querySelectorAll(".message-edit-form")) {
+    if (form instanceof HTMLFormElement) closeMessageEditForm(form);
+  }
+}
+
+function closeMessageEditForm(form) {
+  const card = form.closest(".thread-card");
+  const message = form.closest(".message");
+  const body = message?.querySelector(".message-body");
+  const input = form.querySelector("textarea");
+  if (input && body) {
+    input.value = body.textContent ?? "";
+  }
+  if (body instanceof HTMLElement) {
+    body.hidden = false;
+  }
+  form.hidden = true;
+  card?.classList.remove("editing-message");
+  layoutRail();
+}
+
+async function submitMessageEditForm(form) {
+  const threadId = form.getAttribute("data-edit-form-thread");
+  const messageId = form.getAttribute("data-edit-form-message");
+  const input = form.querySelector("textarea");
+  const body = input?.value.trim() ?? "";
+  if (!threadId || !messageId) return;
+  if (!body) {
+    showNotice("Edit failed", "A comment cannot be empty.");
+    input?.focus();
+    return;
+  }
+
+  const endLocalMutation = beginLocalMutation();
+  try {
+    const response = await fetch(
+      `/api/comments/${encodeURIComponent(threadId)}/messages/${encodeURIComponent(messageId)}`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body }),
+      },
+    );
+
+    if (!response.ok) {
+      const payload = await readJsonPayload(response);
+      showNotice("Edit failed", payload.error || "Redline could not save this comment edit.");
+      updateToolbar();
+      return;
+    }
+
+    state = await response.json();
+    activeThreadId = threadId;
+    render({ preserveFrame: true });
+  } finally {
+    endLocalMutation();
+  }
 }
 
 function closeEmptyReplyForms({ ignoreFocus = false } = {}) {

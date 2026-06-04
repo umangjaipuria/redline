@@ -16,6 +16,7 @@
     "agent:comment": "bun src/agent.ts comment",
     "agent:reply": "bun src/agent.ts reply",
     "agent:delete-reply": "bun src/agent.ts delete-reply",
+    "agent:edit-comment": "bun src/agent.ts edit-comment",
     "agent:resolve": "bun src/agent.ts resolve",
     "agent:apply": "bun src/agent.ts apply"
   },

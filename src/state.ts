@@ -293,6 +293,33 @@ export function deleteReply(
   return readDocumentState(absoluteDocumentPath);
 }
 
+export function updateCommentMessage(
+  documentPath: string,
+  threadId: string,
+  messageId: string,
+  body: string,
+): DocumentState {
+  const absoluteDocumentPath = path.resolve(documentPath);
+  const html = readDocumentHtml(absoluteDocumentPath);
+  const reviewState = readReviewState(absoluteDocumentPath, html);
+  const thread = reviewState.threads.find((item) => item.id === threadId);
+  if (!thread) {
+    throw new Error(`Comment thread not found: ${threadId}`);
+  }
+
+  const message = thread.messages.find((item) => item.id === messageId);
+  if (!message) {
+    throw new Error(`Comment message not found: ${messageId}`);
+  }
+
+  const now = new Date().toISOString();
+  message.body = normalizeBody(body, "Comment body is required.");
+  thread.updatedAt = now;
+  reviewState.updatedAt = now;
+  writeHtmlWithReviewState(absoluteDocumentPath, html, reviewState);
+  return readDocumentState(absoluteDocumentPath);
+}
+
 export function resolveThread(documentPath: string, threadId: string): DocumentState {
   const absoluteDocumentPath = path.resolve(documentPath);
   const html = readDocumentHtml(absoluteDocumentPath);

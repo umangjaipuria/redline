@@ -687,7 +687,7 @@ textarea:focus {
   border-top: 1px solid var(--line-soft);
 }
 
-.message p {
+.message-body {
   margin: 5px 0 0;
   white-space: pre-wrap;
   line-height: 1.5;
@@ -751,12 +751,71 @@ textarea:focus {
   transform: translateY(1px);
 }
 
+.message-edit-form {
+  margin-top: 8px;
+}
+
+.message-edit-form textarea {
+  border-color: var(--focus-line);
+  background: var(--panel-raised);
+}
+
+.message-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.message-edit-control {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-faint);
+  transition: border-color 140ms ease, background-color 140ms ease, color 140ms ease,
+    transform 80ms ease;
+}
+
+.message-edit-control .btn-icon {
+  width: 15px;
+  height: 15px;
+}
+
+.message-edit-control:hover {
+  border-color: var(--focus-line);
+  background: var(--focus-wash);
+  color: var(--ink-soft);
+}
+
+.message-edit-control.confirm {
+  color: var(--red-deep);
+}
+
+.message-edit-control.confirm:hover {
+  border-color: var(--red-line);
+  background: var(--red-wash);
+  color: var(--red-deep);
+}
+
+.message-edit-control:active {
+  transform: translateY(1px);
+}
+
 /* Row of icon actions (reply, delete) under a comment. */
 .thread-foot {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
   margin-top: 12px;
+}
+
+.thread-card.editing-message .thread-foot {
+  display: none;
 }
 
 .reply-form {

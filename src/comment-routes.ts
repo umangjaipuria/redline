@@ -4,6 +4,7 @@ import {
   deleteReply,
   readDocumentState,
   resolveThread,
+  updateCommentMessage,
   type CreateCommentInput,
   type DocumentState,
 } from "./state";
@@ -58,6 +59,23 @@ export async function handleCommentRequest(
         decodeURIComponent(deleteReplyMatch[2] ?? ""),
       ),
       "reply.deleted",
+    );
+  }
+
+  const messageMatch = url.pathname.match(/^\/api\/comments\/([^/]+)\/messages\/([^/]+)$/);
+  if (messageMatch && request.method === "PUT") {
+    const body = await readJson<{ body?: unknown }>(request);
+    if (typeof body.body !== "string") {
+      return json({ error: "body is required." }, 400);
+    }
+    return options.changed(
+      updateCommentMessage(
+        options.documentPath,
+        decodeURIComponent(messageMatch[1] ?? ""),
+        decodeURIComponent(messageMatch[2] ?? ""),
+        body.body,
+      ),
+      "message.updated",
     );
   }
 

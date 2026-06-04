@@ -17,6 +17,7 @@ import {
   resolveDocumentPath,
   resolveThread,
   sidecarPathFor,
+  updateCommentMessage,
   writeSidecar,
   writeDocumentHtml,
 } from "./state";
@@ -175,6 +176,43 @@ test("deletes a single reply without removing the thread", () => {
   });
 });
 
+test("edits original comments and replies without moving anchors", () => {
+  const documentPath = tempDocument();
+  fs.writeFileSync(
+    documentPath,
+    '<!doctype html><html><body><p><span data-redline-anchor="thread_edit">Hello world.</span></p></body></html>',
+  );
+  const withComment = createComment(documentPath, {
+    threadId: "thread_edit",
+    body: "Original comment.",
+    quote: "Hello world.",
+    html: fs.readFileSync(documentPath, "utf8"),
+    anchor: {
+      type: "text-range",
+      anchorId: "thread_edit",
+      quote: "Hello world.",
+    },
+  });
+  const threadId = withComment.threads[0]?.id ?? "";
+  const rootMessageId = withComment.threads[0]?.messages[0]?.id ?? "";
+  const withReply = appendReply(documentPath, threadId, "Original reply.", "AI");
+  const replyId = withReply.threads[0]?.messages[1]?.id ?? "";
+
+  updateCommentMessage(documentPath, threadId, rootMessageId, "Edited comment.");
+  const updated = updateCommentMessage(documentPath, threadId, replyId, "Edited reply.");
+
+  expect(updated.threads[0]?.messages.map((message) => message.body)).toEqual([
+    "Edited comment.",
+    "Edited reply.",
+  ]);
+  expect(updated.summary).toEqual({
+    threads: 1,
+    messages: 2,
+    unresolved: 1,
+  });
+  expect(fs.readFileSync(documentPath, "utf8")).toContain('data-redline-anchor="thread_edit"');
+});
+
 test("rejects invalid comment operations", () => {
   const documentPath = tempDocument();
   const withComment = createComment(documentPath, {
@@ -205,6 +243,15 @@ test("rejects invalid comment operations", () => {
   );
   expect(() => deleteReply(documentPath, "thread_fixed", rootMessageId)).toThrow(
     "The original comment cannot be deleted as a reply.",
+  );
+  expect(() => updateCommentMessage(documentPath, "thread_missing", rootMessageId, "Edit.")).toThrow(
+    "Comment thread not found",
+  );
+  expect(() => updateCommentMessage(documentPath, "thread_fixed", "message_missing", "Edit.")).toThrow(
+    "Comment message not found",
+  );
+  expect(() => updateCommentMessage(documentPath, "thread_fixed", rootMessageId, "  ")).toThrow(
+    "Comment body is required.",
   );
   expect(() => resolveThread(documentPath, "thread_missing")).toThrow("Comment thread not found");
   expect(() =>

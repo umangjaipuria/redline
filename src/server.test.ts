@@ -267,6 +267,52 @@ test("DELETE /api/comments/:threadId/replies/:messageId deletes only that reply"
   expect(payload.summary).toEqual({ threads: 1, messages: 2, unresolved: 1 });
 });
 
+test("PUT /api/comments/:threadId/messages/:messageId edits a routed comment message", async () => {
+  const documentPath = tempDocument();
+  const withComment = createComment(documentPath, {
+    body: "Root comment.",
+    author: "User",
+    anchor: { type: "document" },
+  });
+  const threadId = withComment.threads[0]?.id ?? "";
+  const messageId = withComment.threads[0]?.messages[0]?.id ?? "";
+
+  const router = commentRouter(documentPath);
+  const response = await router.handle(
+    new Request(`http://127.0.0.1/api/comments/${threadId}/messages/${messageId}`, {
+      method: "PUT",
+      body: JSON.stringify({ body: "Edited root comment." }),
+    }),
+  );
+  const payload = await response?.json();
+
+  expect(response?.status).toBe(200);
+  expect(router.reasons).toEqual(["message.updated"]);
+  expect(payload.threads[0]?.messages[0]?.body).toBe("Edited root comment.");
+  expect(payload.summary).toEqual({ threads: 1, messages: 1, unresolved: 1 });
+});
+
+test("PUT /api/comments/:threadId/messages/:messageId rejects missing bodies", async () => {
+  const documentPath = tempDocument();
+  const withComment = createComment(documentPath, {
+    body: "Root comment.",
+    anchor: { type: "document" },
+  });
+  const threadId = withComment.threads[0]?.id ?? "";
+  const messageId = withComment.threads[0]?.messages[0]?.id ?? "";
+
+  const response = await commentRouter(documentPath).handle(
+    new Request(`http://127.0.0.1/api/comments/${threadId}/messages/${messageId}`, {
+      method: "PUT",
+      body: JSON.stringify({}),
+    }),
+  );
+  const payload = await response?.json();
+
+  expect(response?.status).toBe(400);
+  expect(payload.error).toBe("body is required.");
+});
+
 test("comment routes return undefined for unrelated requests", async () => {
   const response = await commentRouter(tempDocument()).handle(
     new Request("http://127.0.0.1/api/state", { method: "GET" }),

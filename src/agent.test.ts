@@ -130,3 +130,49 @@ test("comment helper can anchor a selected repeated occurrence", async () => {
   expect(payload.threads[0]?.anchor.prefix).toBe("Hello world.");
   expect(payload.threads[0]?.messages[0]?.body).toBe("Second note.");
 });
+
+test("edit-comment helper updates an existing comment message", async () => {
+  const documentPath = tempDocument();
+  const createProc = Bun.spawn(
+    [
+      "bun",
+      agentPath,
+      "comment",
+      documentPath,
+      "Hello world.",
+      "Needs a note.",
+      "--thread-id",
+      "thread_edit_cli",
+    ],
+    {
+      cwd: projectRoot,
+      stderr: "pipe",
+      stdout: "pipe",
+    },
+  );
+
+  expect(await createProc.exited).toBe(0);
+  const created = await new Response(createProc.stdout).json();
+  const messageId = String(created.threads[0]?.messages[0]?.id ?? "");
+
+  const editProc = Bun.spawn(
+    [
+      "bun",
+      agentPath,
+      "edit-comment",
+      documentPath,
+      "thread_edit_cli",
+      messageId,
+      "Edited note.",
+    ],
+    {
+      cwd: projectRoot,
+      stderr: "pipe",
+      stdout: "pipe",
+    },
+  );
+
+  expect(await editProc.exited).toBe(0);
+  const edited = await new Response(editProc.stdout).json();
+  expect(edited.threads[0]?.messages[0]?.body).toBe("Edited note.");
+});

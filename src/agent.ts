@@ -10,6 +10,7 @@ import {
   readDocumentState,
   resolveDocumentPath,
   resolveThread,
+  updateCommentMessage,
   type AgentUpdateInput,
   type CommentAnchor,
 } from "./state";
@@ -93,6 +94,16 @@ function run(commandName: string | undefined, argsForCommand: string[]): void {
     if (!threadId) throw new Error("delete-reply requires a thread id.");
     if (!messageId) throw new Error("delete-reply requires a message id.");
     printJson(deleteReply(documentPath, threadId, messageId));
+    return;
+  }
+
+  if (commandName === "edit-comment") {
+    const [documentArg, threadId, messageId, ...bodyParts] = argsForCommand;
+    const documentPath = resolveRequiredDocument(documentArg);
+    if (!threadId) throw new Error("edit-comment requires a thread id.");
+    if (!messageId) throw new Error("edit-comment requires a message id.");
+    const body = bodyParts.join(" ").trim();
+    printJson(updateCommentMessage(documentPath, threadId, messageId, body));
     return;
   }
 
@@ -274,6 +285,7 @@ function printHelp(): void {
   bun src/agent.ts comment <document.html> "<quoted text>" <message> [--occurrence N] [--author AI] [--thread-id thread_xyz]
   bun src/agent.ts reply <document.html> <thread-id> <message> [--author AI]
   bun src/agent.ts delete-reply <document.html> <thread-id> <message-id>
+  bun src/agent.ts edit-comment <document.html> <thread-id> <message-id> <message>
   bun src/agent.ts resolve <document.html> <thread-id>
   bun src/agent.ts apply <document.html> <payload.json>
   bun src/agent.ts update-html <document.html> <updated.html>

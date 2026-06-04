@@ -88,6 +88,12 @@ bun src/agent.ts delete-reply documents/draft.html <thread-id> <message-id>
 
 Only delete messages after the first message in a thread. The first message is the original comment; resolving/deleting the thread removes that original comment and unwraps its anchor.
 
+To edit an existing comment or reply without changing the anchor:
+
+```bash
+bun src/agent.ts edit-comment documents/draft.html <thread-id> <message-id> "Updated comment text."
+```
+
 To apply content and replies in one step, write a temporary JSON payload and run:
 
 ```bash
@@ -128,6 +134,6 @@ Resolve a thread only when the requested work is complete or the user asks for i
 bun src/agent.ts resolve documents/draft.html <thread-id>
 ```
 
-When the server is running, agents can also use `POST /api/comments/<thread-id>/replies`, `DELETE /api/comments/<thread-id>/replies/<message-id>`, `POST /api/comments/<thread-id>/resolve`, and `DELETE /api/comments/<thread-id>`.
+When the server is running, agents can also use `POST /api/comments/<thread-id>/replies`, `PUT /api/comments/<thread-id>/messages/<message-id>`, `DELETE /api/comments/<thread-id>/replies/<message-id>`, `POST /api/comments/<thread-id>/resolve`, and `DELETE /api/comments/<thread-id>`.
 
 When Redline is open in a browser, direct helper edits are picked up by the running server and pushed to the page.
