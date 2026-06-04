@@ -26,6 +26,17 @@ interface QueryRootLike<TElement> {
 
 export const MISSING_THREAD_ORDER: number;
 
+export interface AlignedRailItemTopInput {
+  edgePadding?: number;
+  itemHeight?: number;
+  railScrollTop?: number;
+  railViewportHeight?: number;
+  railViewportTop?: number;
+  targetViewportTop?: number;
+}
+
+export function alignedRailItemTop(input?: AlignedRailItemTopInput): number;
+
 export function sortThreadsForRail<TThread extends RailThreadLike>(
   threads?: readonly TThread[] | null,
   liveOrder?: ReadonlyMap<string, number>,

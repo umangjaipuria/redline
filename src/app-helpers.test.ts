@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import {
+  alignedRailItemTop,
   collectThreadLiveOrderFromAnchors,
   createProgrammaticScrollGuard,
   openAncestorDetails,
@@ -44,6 +45,43 @@ class FakeRoot {
     return this.nodes;
   }
 }
+
+test("aligns a floating rail item with the target viewport position", () => {
+  expect(
+    alignedRailItemTop({
+      edgePadding: 16,
+      itemHeight: 140,
+      railScrollTop: 320,
+      railViewportHeight: 700,
+      railViewportTop: 52,
+      targetViewportTop: 260,
+    }),
+  ).toBe(528);
+});
+
+test("keeps a floating rail item visible near rail edges", () => {
+  expect(
+    alignedRailItemTop({
+      edgePadding: 16,
+      itemHeight: 180,
+      railScrollTop: 100,
+      railViewportHeight: 500,
+      railViewportTop: 52,
+      targetViewportTop: 20,
+    }),
+  ).toBe(116);
+
+  expect(
+    alignedRailItemTop({
+      edgePadding: 16,
+      itemHeight: 180,
+      railScrollTop: 100,
+      railViewportHeight: 500,
+      railViewportTop: 52,
+      targetViewportTop: 620,
+    }),
+  ).toBe(404);
+});
 
 test("sorts comment threads by live anchor order before stale text positions", () => {
   const threads = [

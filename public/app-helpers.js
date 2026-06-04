@@ -1,5 +1,28 @@
 export const MISSING_THREAD_ORDER = Number.MAX_SAFE_INTEGER;
 
+export function alignedRailItemTop({
+  edgePadding = 16,
+  itemHeight = 0,
+  railScrollTop = 0,
+  railViewportHeight = 0,
+  railViewportTop = 0,
+  targetViewportTop = 0,
+} = {}) {
+  const safeEdgePadding = Math.max(0, finiteNumber(edgePadding, 0));
+  const safeItemHeight = Math.max(0, finiteNumber(itemHeight, 0));
+  const safeRailScrollTop = Math.max(0, finiteNumber(railScrollTop, 0));
+  const safeRailViewportHeight = Math.max(0, finiteNumber(railViewportHeight, 0));
+  const safeRailViewportTop = finiteNumber(railViewportTop, 0);
+  const targetTopWithinRail = finiteNumber(targetViewportTop, safeRailViewportTop) - safeRailViewportTop;
+  const minTopWithinRail = safeEdgePadding;
+  const maxTopWithinRail = Math.max(
+    minTopWithinRail,
+    safeRailViewportHeight - safeItemHeight - safeEdgePadding,
+  );
+
+  return safeRailScrollTop + clamp(targetTopWithinRail, minTopWithinRail, maxTopWithinRail);
+}
+
 export function sortThreadsForRail(threads, liveOrder = new Map()) {
   return [...(threads ?? [])].sort((left, right) => {
     const leftStart =
@@ -82,4 +105,12 @@ export function createProgrammaticScrollGuard({
       return active;
     },
   };
+}
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function finiteNumber(value, fallback) {
+  return Number.isFinite(value) ? value : fallback;
 }

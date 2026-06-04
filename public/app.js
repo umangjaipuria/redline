@@ -1,4 +1,5 @@
 import {
+  alignedRailItemTop,
   collectThreadLiveOrderFromAnchors,
   createProgrammaticScrollGuard,
   openAncestorDetails,
@@ -165,6 +166,7 @@ commentForm.addEventListener("submit", async (event) => {
     pendingSelection = null;
     closeComposer({ discardDraft: false });
     render({ preserveFrame: true });
+    revealThreadCardInRailSoon(threadId, { behavior: "smooth" });
   } finally {
     endLocalMutation();
   }
@@ -1019,7 +1021,8 @@ function openComposer() {
   // Commenting implies you want the rail; reopen it and keep it open afterward.
   setRailCollapsed(false);
   layoutRail();
-  commentBody.focus();
+  requestAnimationFrame(layoutRail);
+  commentBody.focus({ preventScroll: true });
 }
 
 // ---------- Comment rail viewport sync ----------
@@ -1031,9 +1034,48 @@ function layoutRail() {
   if (!commentRailInner) return;
   commentRailInner.style.height = "";
   composer.style.top = "";
+  composer.classList.remove("composer-floating");
   for (const card of threadsEl.querySelectorAll(".thread-card")) {
     card.style.top = "";
   }
+  if (composer.hidden === false) {
+    positionComposerNearPendingAnchor();
+  }
+}
+
+function positionComposerNearPendingAnchor() {
+  if (!pendingSelection?.threadId || !shouldFloatComposer()) return;
+
+  const doc = frame.contentDocument;
+  if (!doc?.body) return;
+
+  const metric = anchorViewportMetric(pendingSelection.threadId, doc);
+  if (!metric) return;
+
+  const frameRect = frame.getBoundingClientRect();
+  const railRect = commentRail.getBoundingClientRect();
+  if (railRect.width <= 0 || railRect.height <= 0) return;
+
+  composer.classList.add("composer-floating");
+  const top = alignedRailItemTop({
+    edgePadding: RAIL_EDGE_PADDING,
+    itemHeight: composer.offsetHeight,
+    railScrollTop: commentRail.scrollTop,
+    railViewportHeight: commentRail.clientHeight,
+    railViewportTop: railRect.top,
+    targetViewportTop: frameRect.top + metric.top,
+  });
+
+  composer.style.top = `${Math.round(top)}px`;
+
+  const minHeight = top + composer.offsetHeight + RAIL_EDGE_PADDING;
+  if (minHeight > commentRailInner.offsetHeight) {
+    commentRailInner.style.height = `${Math.ceil(minHeight)}px`;
+  }
+}
+
+function shouldFloatComposer() {
+  return window.matchMedia("(min-width: 941px)").matches && getComputedStyle(commentRail).overflowY !== "visible";
 }
 
 function syncRailToFrameViewport({ force = false, behavior = "auto" } = {}) {
@@ -1157,6 +1199,7 @@ function closeComposer({ discardDraft = false } = {}) {
   }
   composer.hidden = true;
   composer.style.top = "";
+  composer.classList.remove("composer-floating");
   commentBody.value = "";
   updateToolbar();
   updateRail();
@@ -1303,7 +1346,16 @@ function renderThreads() {
         <article class="thread-card ${active ? "active" : ""} ${anchorMissing ? "unanchored" : ""}" data-thread-id="${escapeHtml(thread.id)}">
           ${
             anchorMissing
-              ? `<div class="anchor-warning">Anchor text changed. Thread kept until resolved.</div>`
+              ? `
+                <p class="thread-detached" role="note">
+                  <svg class="detached-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M10.2 13.4 8.4 15.2a3.1 3.1 0 0 1-4.4-4.4l1.8-1.8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                    <path d="m13.8 10.6 1.8-1.8a3.1 3.1 0 0 1 4.4 4.4l-1.8 1.8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                    <path d="M8.5 7.2 7.1 5.8M16.9 18.2l-1.4-1.4M5.9 9.6 4 9.1M18.1 14.4l1.9.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+                  </svg>
+                  <span>Orphaned <span class="detached-note">&middot; kept until you resolve it</span></span>
+                </p>
+              `
               : ""
           }
           ${messages}

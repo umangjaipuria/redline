@@ -582,6 +582,13 @@ button.open-icon:disabled {
   animation: fade-up 0.2s cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 
+.composer-floating {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  margin-bottom: 0;
+}
+
 textarea {
   width: 100%;
   resize: vertical;
@@ -629,9 +636,11 @@ textarea:focus {
   transition: border-color 160ms ease, box-shadow 160ms ease;
 }
 
+/* Amber only in the header, fading to the normal card surface. No active-state
+   override: an orphaned card still gets the usual red "in play" ring. */
 .thread-card.unanchored {
-  border-color: rgba(169, 118, 28, 0.4);
-  background: linear-gradient(180deg, #fdf6e6 0%, var(--panel-raised) 60%);
+  border-color: rgba(169, 118, 28, 0.42);
+  background: linear-gradient(180deg, #fcf1d6 0%, var(--panel-raised) 58%);
 }
 
 /* The focused comment (anchor clicked, caret in the anchor, card clicked, or
@@ -652,33 +661,26 @@ textarea:focus {
   border-top: 0;
 }
 
-.anchor-warning {
+/* A single quiet line carries the state; the dashed margin bar does the rest. */
+.thread-detached {
   display: flex;
-  align-items: flex-start;
-  gap: 7px;
-  margin-top: 10px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  background: rgba(169, 118, 28, 0.12);
-  color: #855c14;
-  font-size: 12px;
-  line-height: 1.4;
-  font-weight: 500;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 11px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #9a7526;
 }
 
-.anchor-warning::before {
-  content: "!";
-  display: grid;
-  place-items: center;
-  width: 15px;
-  height: 15px;
+.detached-icon {
+  width: 13px;
+  height: 13px;
   flex: none;
-  margin-top: 1px;
-  border-radius: 50%;
-  background: var(--amber);
-  color: #fff;
-  font-size: 11px;
-  font-weight: 700;
+}
+
+.detached-note {
+  font-weight: 400;
+  color: var(--ink-faint);
 }
 
 .message {
@@ -920,5 +922,10 @@ textarea:focus {
     height: auto;
     width: auto;
     padding: 16px;
+  }
+
+  .composer-floating {
+    position: static;
+    margin-bottom: 14px;
   }
 }

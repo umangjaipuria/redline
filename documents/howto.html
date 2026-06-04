@@ -207,6 +207,11 @@
         background: var(--blue);
       }
 
+      .callout.amber {
+        background: linear-gradient(180deg, #fcf1d6 0%, var(--surface) 70%);
+        border-color: rgba(169, 118, 28, 0.42);
+      }
+
       .callout strong {
         display: block;
         margin-bottom: 6px;
@@ -384,6 +389,38 @@ bun src/agent.ts apply documents/howto.html /tmp/redline-update.json</code></pre
         </div>
       </section>
 
+      <section>
+        <h2>When comments orphan</h2>
+        <p>
+          A thread stays put as long as Redline can find its text &mdash; either by the persisted
+          <code>data-redline-anchor</code> span or, failing that, by matching the stored quote. If you rewrite the reviewed
+          text and the span is gone (or never existed), the quote no longer matches and the thread becomes
+          <strong>orphaned</strong>: it shows an amber &ldquo;Orphaned &middot; kept until you resolve it&rdquo; header and floats
+          free of the document. Redline keeps it open rather than dropping it, so feedback is never silently lost.
+        </p>
+        <p>When you revise anchored text, move the anchor with it:</p>
+        <ul>
+          <li>
+            <strong>Best &mdash; move the span.</strong> Keep the <code>data-redline-anchor</code> span wrapped around the
+            revised text. Its location is stored in the file, so it survives any rewording and the thread stays anchored.
+          </li>
+          <li>
+            <strong>Quote-only threads &mdash; update the quote.</strong> With no span, edit the thread&rsquo;s
+            <code>anchor.quote</code> (and top-level <code>quote</code>, plus <code>textPosition</code>/<code>prefix</code>/<code>suffix</code>
+            if present) in <code>#redline-state</code> to the new text.
+          </li>
+          <li>
+            <strong>Subject removed entirely.</strong> Reply explaining the change and resolve the thread if the feedback is
+            addressed; otherwise leave it orphaned for a human to decide.
+          </li>
+        </ul>
+        <div class="callout amber">
+          <strong>Re-anchor, don&rsquo;t orphan</strong>
+          When in doubt, wrap the revised text in the same <code>data-redline-anchor</code> span. The persisted span is the
+          only anchor that survives arbitrary edits &mdash; the stored quote drifts as soon as the wording changes.
+        </div>
+      </section>
+
       <div class="grid">
         <section>
           <h2>Apply an agent update</h2>
@@ -416,7 +453,7 @@ bun src/agent.ts apply documents/howto.html /tmp/redline-update.json</code></pre
           <h2>Troubleshooting</h2>
           <ul class="two-column-list">
             <li>If a save pauses, reload before continuing so edits do not overwrite a newer file.</li>
-            <li>If an anchor warning appears, the text changed but the thread stayed open for review.</li>
+            <li>If a thread is marked <strong>Orphaned</strong>, its anchored text changed; the thread stayed open for review. Re-wrap the revised text in its <code>data-redline-anchor</code> span to re-anchor it.</li>
             <li>If an anchor is inside a closed <code>&lt;details&gt;</code> block, selecting the thread opens that disclosure temporarily; custom hidden panels may need a manual reveal path.</li>
             <li>If quoted text appears more than once, use <code>--occurrence</code> instead of relying on a first match.</li>
             <li>If the browser is closed, agents can still use the direct Bun helper commands.</li>

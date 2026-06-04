@@ -80,6 +80,7 @@ Rules:
 - Keep `thread.id`, `thread.anchor.anchorId`, and `data-redline-anchor` aligned when possible.
 - Do not add runtime classes such as `redline-highlight`; the app adds those while rendering.
 - If an anchor disappears, Redline may fall back to quote matching, but the thread should remain open until resolved.
+- When you rewrite anchored text, move the anchor with it (see [When threads orphan](#when-threads-orphan-and-how-to-avoid-it)). Otherwise the thread orphans.
 
 ### How anchoring resolves in the browser
 
@@ -95,6 +96,23 @@ So a comment created with a unique quote, or with a quote plus `textPosition`, w
 Anchors can live inside native HTML disclosure widgets such as closed `<details>` blocks. In the browser, selecting the thread should temporarily open any closed ancestor `<details>` before scrolling to the anchor; that runtime-opened state is removed before saving so the source document does not gain an unintended `open` attribute.
 
 If a user reports a missing anchor, inspect the HTML for the thread's `data-redline-anchor` first. If the span exists inside a closed `<details>`, the comment is still anchored; the browser just needs to reveal the disclosure. Redline can do this generically for native `<details>`, but not for arbitrary custom accordions, `display:none` regions, or JavaScript-driven panels with document scripts disabled. For those custom hiding patterns, keep the anchor span intact and explain that the document needs a manual or document-specific reveal path.
+
+### When threads orphan (and how to avoid it)
+
+A thread is *orphaned* when Redline can locate it by **neither** its `data-redline-anchor` span **nor** quote matching. In the browser it shows an amber "Orphaned · kept until you resolve it" header and floats free of the document text. This is deliberate: orphaned threads are kept, never auto-deleted, so review feedback is not silently lost. But a floating thread is harder to act on, so avoid creating one.
+
+A thread orphans when you revise the anchored text and the anchor no longer points at it:
+
+- the `data-redline-anchor` span was removed or unwrapped, **and**
+- quote matching fails because the rewrite shifted `anchor.textPosition` and changed the text so it no longer matches `anchor.quote` (or its `prefix`/`suffix` context).
+
+When you rewrite anchored text, update the anchor along with the text. In order of preference:
+
+1. **Move the span (most durable).** Keep the `data-redline-anchor` span wrapped around the revised text. The span's location is persisted in the file, so it survives any rewording and the thread stays anchored regardless of quote drift. Prefer this whenever a span exists or can be added.
+2. **Update the quote (span-less threads).** If the thread relies on quote matching only, edit the thread's `anchor.quote` and top-level `quote` in `#redline-state` to the new text, and refresh `anchor.textPosition`/`prefix`/`suffix` if present. A stale quote is the most common cause of orphaning.
+3. **Subject removed entirely.** If the text the comment referred to is gone, reply explaining the change and `resolve` the thread if the feedback is addressed; otherwise leave it open and orphaned for the human to decide.
+
+Do not "fix" an orphaned thread by deleting it unless you are resolving the underlying feedback.
 
 ### Thread and anchor ids
 
