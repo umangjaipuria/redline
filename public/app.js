@@ -62,6 +62,8 @@ const frameScrollGuard = createProgrammaticScrollGuard({
     if (activeThreadId !== threadId) {
       activateThreadWithoutRender(threadId);
     }
+    layoutRail();
+    revealThreadCardInRailSoon(threadId, { behavior: "smooth" });
   },
 });
 
@@ -660,7 +662,7 @@ function setupFrame() {
   const onFrameScroll = () => {
     if (!trackingActive) return;
     if (frameScrollGuard.isActive()) {
-      syncFrameViewport();
+      repositionSelectionFab();
       return;
     }
     syncFrameViewport();
@@ -1096,6 +1098,7 @@ function openComposer() {
 // anchors. Explicit clicks choose which pair gets active-state priority.
 function layoutRail() {
   if (!commentRailInner) return;
+  const railScrollTop = commentRail.scrollTop;
   commentRailInner.style.height = "";
   commentRailInner.classList.remove("rail-aligned");
   threadsEl.style.height = "";
@@ -1127,7 +1130,7 @@ function layoutRail() {
       height: item.element.offsetHeight,
       targetViewportTop: item.targetViewportTop,
     })),
-    railScrollTop: commentRail.scrollTop,
+    railScrollTop,
     railViewportHeight: commentRail.clientHeight,
     railViewportTop: railRect.top,
   });
@@ -1142,6 +1145,16 @@ function layoutRail() {
   const minHeight = Math.max(commentRail.clientHeight, layout.contentHeight);
   if (minHeight > 0) {
     commentRailInner.style.height = `${Math.ceil(minHeight)}px`;
+  }
+  restoreRailScrollTop(railScrollTop);
+}
+
+function restoreRailScrollTop(scrollTop) {
+  if (!Number.isFinite(scrollTop)) return;
+  const maxTop = Math.max(0, commentRail.scrollHeight - commentRail.clientHeight);
+  const nextTop = Math.max(0, Math.min(maxTop, scrollTop));
+  if (Math.abs(commentRail.scrollTop - nextTop) >= 1) {
+    commentRail.scrollTop = nextTop;
   }
 }
 
@@ -1240,10 +1253,7 @@ function revealThreadCardInRail(threadId, { behavior = "auto" } = {}) {
 
 function revealThreadCardInRailSoon(threadId, options = {}) {
   revealThreadCardInRail(threadId, options);
-  if (railRevealFrame != null) {
-    cancelAnimationFrame(railRevealFrame);
-  }
-  clearTimeout(railRevealTimer);
+  cancelRailReveal();
   railRevealFrame = requestAnimationFrame(() => {
     railRevealFrame = null;
     revealThreadCardInRail(threadId, options);
@@ -1251,6 +1261,15 @@ function revealThreadCardInRailSoon(threadId, options = {}) {
   railRevealTimer = setTimeout(() => {
     revealThreadCardInRail(threadId, options);
   }, 140);
+}
+
+function cancelRailReveal() {
+  if (railRevealFrame != null) {
+    cancelAnimationFrame(railRevealFrame);
+    railRevealFrame = null;
+  }
+  clearTimeout(railRevealTimer);
+  railRevealTimer = null;
 }
 
 function closeComposer({ discardDraft = false } = {}) {
@@ -1650,10 +1669,16 @@ function deselectThread() {
 
 function selectThread(threadId, keepFocus = false) {
   activateThreadWithoutRender(threadId);
-  layoutRail();
-  revealThreadCardInRailSoon(threadId, { behavior: "smooth" });
-  if (!keepFocus) {
-    scrollToThreadAnchor(threadId);
+  if (keepFocus) {
+    layoutRail();
+    revealThreadCardInRailSoon(threadId, { behavior: "smooth" });
+    return;
+  }
+
+  cancelRailReveal();
+  if (!scrollToThreadAnchor(threadId)) {
+    layoutRail();
+    revealThreadCardInRailSoon(threadId, { behavior: "smooth" });
   }
 }
 
@@ -1911,11 +1936,12 @@ function scrollToThreadAnchor(threadId) {
   const anchor = doc?.querySelector(
     `.redline-highlight[data-thread-id="${escapedThreadId}"], .coauthor-highlight[data-thread-id="${escapedThreadId}"]`,
   );
-  if (!anchor) return;
+  if (!anchor) return false;
 
   openAncestorDetails(anchor);
   frameScrollGuard.begin(threadId);
   anchor.scrollIntoView({ block: "center", behavior: "smooth" });
+  return true;
 }
 
 function updateToolbar() {

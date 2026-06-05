@@ -623,6 +623,7 @@ button.open-icon:disabled {
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
+  overflow-anchor: none;
   scrollbar-gutter: stable;
 }
 
@@ -640,6 +641,7 @@ button.open-icon:disabled {
   width: var(--comment-rail-width);
   max-width: 100%;
   padding: 16px;
+  overflow-anchor: none;
 }
 
 .composer,
