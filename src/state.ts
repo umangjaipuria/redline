@@ -53,6 +53,13 @@ export interface DocumentState {
   updatedAt: string;
   threads: CommentThread[];
   summary: ReviewSummary;
+  // Set on the placeholder state served when no document is open. The client
+  // renders its "open a file" panel instead of a document, and the server
+  // rejects any write until a real document is opened.
+  noDocument?: boolean;
+  // Absolute path to the bundled how-to, present only when it exists on disk so
+  // the empty state can offer to open it in one click.
+  howtoPath?: string;
 }
 
 export interface CommentState {
@@ -114,6 +121,24 @@ const agentGuideCommentPattern = /<!--\s*redline-agent-guide:/i;
 
 export function defaultDocumentPath(cwd = process.cwd()): string {
   return path.join(cwd, "documents", "howto.html");
+}
+
+// The placeholder state served when no document is open. Nothing is written to
+// disk — the client shows its "open a file" panel, and opening a file switches
+// the server to a real document. `howtoPath` is included only when the bundled
+// how-to exists, so the panel can offer to open it.
+export function emptyDocumentState(howtoPath?: string): DocumentState {
+  return {
+    documentPath: "",
+    legacySidecarPath: "",
+    html: "",
+    version: "",
+    updatedAt: emptyReviewUpdatedAt,
+    threads: [],
+    summary: summarize([]),
+    noDocument: true,
+    ...(howtoPath ? { howtoPath } : {}),
+  };
 }
 
 export function resolveDocumentPath(input?: string, cwd = process.cwd()): string {

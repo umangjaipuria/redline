@@ -11,6 +11,7 @@ import {
 } from "./server-registry";
 import {
   applyAgentUpdate,
+  emptyDocumentState,
   openDocumentForReview,
   readDocumentState,
   resolveDocumentPath,
@@ -20,6 +21,9 @@ import {
 } from "./state";
 
 export interface ServerOptions {
+  // Empty when the server starts with no document open (no path given, or the
+  // given path was not an existing .html file). The client then shows its
+  // "open a file" panel instead of a document.
   documentPath: string;
   host: string;
   port: number;
@@ -30,10 +34,24 @@ interface ServerRuntime {
   latestVersion: string;
   eventClients: Set<ReadableStreamDefaultController<Uint8Array>>;
   serverUrl?: string;
+  // Absolute path to the bundled how-to, set only when it exists so the empty
+  // state can offer to open it.
+  howtoPath?: string;
+}
+
+function howtoIfExists(): string | undefined {
+  return fs.existsSync(bundledHowtoPath) ? bundledHowtoPath : undefined;
+}
+
+function hasDocument(runtime: ServerRuntime): boolean {
+  return runtime.options.documentPath.length > 0;
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.resolve(__dirname, "../public");
+// The how-to ships alongside the server; offer it from the empty state only
+// when it is actually present.
+const bundledHowtoPath = path.resolve(__dirname, "../documents/howto.html");
 // A fixed per-user location so any Claude Code instance can find the running
 // server(s) regardless of their working directory. Deliberately NOT honoring
 // $XDG_STATE_HOME: the whole point is a predictable path the agent skill can
@@ -52,7 +70,9 @@ if (import.meta.main) {
 
 export function createRequestHandler(options: ServerOptions): (request: Request) => Promise<Response> {
   const runtime = createRuntime(options);
-  runtime.latestVersion = openDocumentForReview(runtime.options.documentPath).version;
+  runtime.latestVersion = hasDocument(runtime)
+    ? openDocumentForReview(runtime.options.documentPath).version
+    : "";
   return async (request) => {
     try {
       return await handleRequest(request, runtime);
@@ -65,7 +85,9 @@ export function createRequestHandler(options: ServerOptions): (request: Request)
 
 function startServer(options: ServerOptions): void {
   const runtime = createRuntime(options);
-  const openedState = openDocumentForReview(runtime.options.documentPath);
+  const openedState = hasDocument(runtime)
+    ? openDocumentForReview(runtime.options.documentPath)
+    : emptyDocumentState(runtime.howtoPath);
   const server = Bun.serve({
     hostname: runtime.options.host,
     port: runtime.options.port,
@@ -89,7 +111,11 @@ function startServer(options: ServerOptions): void {
   runtime.latestVersion = openedState.version;
   setInterval(() => pollForExternalChanges(runtime), 750).unref?.();
 
-  console.log(`Redline is serving ${runtime.options.documentPath}`);
+  console.log(
+    hasDocument(runtime)
+      ? `Redline is serving ${runtime.options.documentPath}`
+      : "Redline started with no document open — choose a file from the browser.",
+  );
   console.log(`Open ${server.url}`);
   console.log(`Agent state: ${new URL("/api/agent/state", server.url)}`);
   console.log(`Server state: ${serverStateFilePath(serversDir, process.pid)}`);
@@ -113,6 +139,7 @@ function createRuntime(options: ServerOptions): ServerRuntime {
     options: { ...options },
     latestVersion: "",
     eventClients: new Set<ReadableStreamDefaultController<Uint8Array>>(),
+    howtoPath: howtoIfExists(),
   };
 }
 
@@ -131,8 +158,16 @@ async function handleRequest(request: Request, runtime: ServerRuntime): Promise<
     return new Response(null, { headers: corsHeaders() });
   }
 
+  // With no document open there is nothing on disk to read or write. Answer the
+  // read endpoints with the empty state, reject writes, and let open/dialog,
+  // events, and static assets fall through so the user can pick a file.
+  if (!hasDocument(runtime)) {
+    const response = handleWithoutDocument(request, runtime, url);
+    if (response) return response;
+  }
+
   if (url.pathname === "/api/health") {
-    return json({ ok: true, documentPath: runtime.options.documentPath });
+    return json({ ok: true, documentPath: runtime.options.documentPath || null });
   }
 
   if (url.pathname === "/api/state" || url.pathname === "/api/agent/state") {
@@ -208,6 +243,40 @@ async function handleRequest(request: Request, runtime: ServerRuntime): Promise<
   return serveStatic(url.pathname);
 }
 
+// Endpoint handling while no document is open. Returns undefined for anything
+// that should fall through to the normal handlers (open, open-dialog, events,
+// static assets) so the user can still pick a file.
+function handleWithoutDocument(
+  request: Request,
+  runtime: ServerRuntime,
+  url: URL,
+): Response | undefined {
+  const { pathname } = url;
+
+  if (pathname === "/api/health") {
+    return json({ ok: true, documentPath: null });
+  }
+
+  if (
+    pathname === "/api/state" ||
+    pathname === "/api/agent/state" ||
+    pathname === "/api/agent/comments" ||
+    pathname === "/api/agent/file"
+  ) {
+    return json(emptyDocumentState(runtime.howtoPath));
+  }
+
+  if (
+    (pathname === "/api/document" && request.method === "PUT") ||
+    pathname.startsWith("/api/comments") ||
+    pathname === "/api/agent/update"
+  ) {
+    return json({ error: "No document is open. Open an HTML file in Redline first." }, 409);
+  }
+
+  return undefined;
+}
+
 function changed(runtime: ServerRuntime, state: DocumentState, reason: string): Response {
   runtime.latestVersion = state.version;
   broadcast(runtime, reason, state);
@@ -233,6 +302,7 @@ function openTarget(runtime: ServerRuntime, target: string): Response {
 }
 
 function pollForExternalChanges(runtime: ServerRuntime): void {
+  if (!hasDocument(runtime)) return;
   try {
     const state = readDocumentState(runtime.options.documentPath);
     if (state.version === runtime.latestVersion) return;
@@ -509,10 +579,24 @@ function parseArgs(args: string[]): ServerOptions {
   }
 
   return {
-    documentPath: resolveDocumentPath(documentArg),
+    documentPath: resolveStartupDocument(documentArg),
     host,
     port,
   };
+}
+
+// Redline reviews existing HTML files; it never creates one. A missing or
+// non-HTML argument (and the no-argument case) starts the server with no
+// document open, so the browser prompts the user to choose a file instead of
+// littering the working directory with a placeholder.
+function resolveStartupDocument(documentArg?: string): string {
+  if (!documentArg || documentArg.trim().length === 0) return "";
+  const resolved = resolveDocumentPath(documentArg);
+  if (fs.existsSync(resolved) && fs.statSync(resolved).isFile() && /\.html?$/i.test(resolved)) {
+    return resolved;
+  }
+  console.warn(`Redline could not open ${resolved} — not an existing .html file. Starting with no document open.`);
+  return "";
 }
 
 function requireValue(args: string[], index: number, flag: string): string {
@@ -536,10 +620,11 @@ function parsePort(value: string): number {
 
 function printHelp(): void {
   console.log(`Usage:
-  bun run start -- [document.html] [--port 7331] [--host 127.0.0.1]
-  bun run start -- [document.html] -p 8099
+  bun run start [document.html] [--port 7331] [--host 127.0.0.1]
+  bun run start [document.html] -p 8099
 
-The server creates documents/howto.html when no document path is provided.
+With no document path (or one that isn't an existing .html file), the server
+starts with nothing open and the browser prompts you to choose a file.
 Agent-readable state is available at /api/agent/state and in embedded review
 JSON inside the HTML file.`);
 }

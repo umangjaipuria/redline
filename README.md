@@ -45,7 +45,9 @@ Redline is a local app that opens an agent-written HTML document in your browser
    bun run start documents/howto.html
    ```
 
-   With no path, Redline creates and opens `documents/howto.html` — a live sample you can comment on right away.
+   With no path — or a path that isn't an existing HTML file — Redline starts with no document open and prompts you
+   to choose one in the browser (the bundled `documents/howto.html` guide is offered as a starting point). Redline
+   only reviews files that already exist; it never creates one for you.
 
    ```bash
    bun run start

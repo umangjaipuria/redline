@@ -100,6 +100,23 @@
             title="Reviewed HTML document"
             sandbox="allow-same-origin allow-forms allow-popups"
           ></iframe>
+
+          <div id="emptyState" class="empty-state" hidden>
+            <div class="empty-state-card">
+              <span class="empty-state-mark" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" width="34" height="34">
+                  <path d="M4 8V6.2A1.7 1.7 0 0 1 5.7 4.5H9l2 2h6.3A1.7 1.7 0 0 1 19 8.2" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+                  <path d="M3.2 9.5h17.2l-2.1 8.3a1 1 0 0 1-1 .7H6.3a1 1 0 0 1-1-.7z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+                </svg>
+              </span>
+              <h1>No document open</h1>
+              <p>Open an HTML file to review it here. Comments are saved inside the file itself, so it stays portable.</p>
+              <button id="emptyOpenButton" type="button" class="primary-button">Open a file…</button>
+              <p id="howtoHint" class="empty-howto" hidden>
+                New to Redline? <a id="howtoLink" href="#">Open the how-to guide</a>.
+              </p>
+            </div>
+          </div>
         </section>
 
         <aside class="comment-rail" aria-label="Comment threads">

@@ -29,6 +29,10 @@ const railToggle = document.querySelector("#railToggle");
 const railToggleCount = document.querySelector("#railToggleCount");
 const openButton = document.querySelector("#openButton");
 const selectionFab = document.querySelector("#selectionFab");
+const emptyState = document.querySelector("#emptyState");
+const emptyOpenButton = document.querySelector("#emptyOpenButton");
+const howtoHint = document.querySelector("#howtoHint");
+const howtoLink = document.querySelector("#howtoLink");
 
 let state = null;
 let editMode = false;
@@ -89,6 +93,11 @@ commentRail.addEventListener("scroll", () => {
 }, { passive: true });
 
 openButton.addEventListener("click", () => void openViaDialog());
+emptyOpenButton.addEventListener("click", () => void openViaDialog());
+howtoLink.addEventListener("click", (event) => {
+  event.preventDefault();
+  void openPath(state?.howtoPath);
+});
 selectionFab.addEventListener("mousedown", (event) => event.preventDefault());
 selectionFab.addEventListener("click", () => {
   beginCommentFromSelection();
@@ -398,6 +407,13 @@ function beginLocalMutation() {
 
 function render({ preserveFrame = false } = {}) {
   if (!state) return;
+  if (state.noDocument) {
+    renderEmptyState();
+    return;
+  }
+  appShell.dataset.empty = "false";
+  emptyState.hidden = true;
+  frame.hidden = false;
   documentPathEl.textContent = state.documentPath;
   if (!preserveFrame) {
     renderFrame();
@@ -408,6 +424,24 @@ function render({ preserveFrame = false } = {}) {
   if (preserveFrame) {
     syncHighlightSelection();
   }
+}
+
+// Shown when the server has no document open: the document pane is replaced by
+// the "open a file" panel, and the how-to link appears only when the bundled
+// guide exists.
+function renderEmptyState() {
+  appShell.dataset.empty = "true";
+  frame.hidden = true;
+  emptyState.hidden = false;
+  documentPathEl.textContent = "";
+  composer.hidden = true;
+  threadsEl.replaceChildren();
+  activeThreadId = null;
+  pendingSelection = null;
+  hideSelectionFab();
+  hideNotice();
+  howtoHint.hidden = !state.howtoPath;
+  updateRail();
 }
 
 function setRailCollapsed(collapsed) {
@@ -472,7 +506,44 @@ async function openViaDialog() {
   }
   const data = await response.json();
   if (data.cancelled) return;
+  applyOpenedDocument(data);
+}
 
+// Open a specific file by path (used by the how-to link in the empty state).
+// The same guards as the dialog apply: never drop unsaved edits.
+async function openPath(targetPath) {
+  if (!targetPath) return;
+  if (saving) return;
+  if (dirty) {
+    await saveNow();
+  }
+  if (dirty || blockedRemoteUpdate) {
+    showNotice(
+      "Unsaved changes",
+      "Save or reload this document before opening another file.",
+    );
+    return;
+  }
+  let response;
+  try {
+    response = await fetch("/api/open", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: targetPath }),
+    });
+  } catch {
+    showNotice("Open failed", "Redline could not reach the local server.");
+    return;
+  }
+  if (!response.ok) {
+    const payload = await readJsonPayload(response);
+    showNotice("Open failed", payload.error || "That file could not be opened.");
+    return;
+  }
+  applyOpenedDocument(await response.json());
+}
+
+function applyOpenedDocument(data) {
   state = data;
   activeThreadId = null;
   pendingSelection = null;
