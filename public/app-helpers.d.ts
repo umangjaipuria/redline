@@ -37,6 +37,29 @@ export interface AlignedRailItemTopInput {
 
 export function alignedRailItemTop(input?: AlignedRailItemTopInput): number;
 
+export interface StackedRailItemLayoutItem {
+  id: string;
+  height?: number;
+  targetViewportTop?: number | null;
+}
+
+export interface StackedRailItemLayoutInput {
+  activeId?: string | null;
+  edgePadding?: number;
+  gap?: number;
+  items?: readonly StackedRailItemLayoutItem[] | null;
+  railScrollTop?: number;
+  railViewportHeight?: number;
+  railViewportTop?: number;
+}
+
+export interface StackedRailItemLayoutResult {
+  contentHeight: number;
+  positions: Map<string, number>;
+}
+
+export function stackedRailItemLayout(input?: StackedRailItemLayoutInput): StackedRailItemLayoutResult;
+
 export function sortThreadsForRail<TThread extends RailThreadLike>(
   threads?: readonly TThread[] | null,
   liveOrder?: ReadonlyMap<string, number>,

@@ -6,6 +6,7 @@ import {
   openAncestorDetails,
   removeRuntimeOpenedDetails,
   sortThreadsForRail,
+  stackedRailItemLayout,
 } from "../public/app-helpers.js";
 
 class FakeElement {
@@ -59,7 +60,7 @@ test("aligns a floating rail item with the target viewport position", () => {
   ).toBe(528);
 });
 
-test("keeps a floating rail item visible near rail edges", () => {
+test("lets a floating rail item follow the anchor past rail edges", () => {
   expect(
     alignedRailItemTop({
       edgePadding: 16,
@@ -69,7 +70,7 @@ test("keeps a floating rail item visible near rail edges", () => {
       railViewportTop: 52,
       targetViewportTop: 20,
     }),
-  ).toBe(116);
+  ).toBe(68);
 
   expect(
     alignedRailItemTop({
@@ -80,7 +81,84 @@ test("keeps a floating rail item visible near rail edges", () => {
       railViewportTop: 52,
       targetViewportTop: 620,
     }),
-  ).toBe(404);
+  ).toBe(668);
+});
+
+test("lets passive rail cards scroll above the rail with their anchors", () => {
+  const layout = stackedRailItemLayout({
+    edgePadding: 16,
+    gap: 12,
+    railScrollTop: 0,
+    railViewportHeight: 500,
+    railViewportTop: 52,
+    items: [
+      { id: "thread_a", height: 100, targetViewportTop: 20 },
+      { id: "thread_b", height: 100, targetViewportTop: 220 },
+    ],
+  });
+
+  expect(layout.positions.get("thread_a")).toBe(-32);
+  expect(layout.positions.get("thread_b")).toBe(168);
+});
+
+test("stacks rail cards toward their anchor-aligned positions in document order", () => {
+  const layout = stackedRailItemLayout({
+    edgePadding: 16,
+    gap: 12,
+    railScrollTop: 0,
+    railViewportHeight: 700,
+    railViewportTop: 52,
+    items: [
+      { id: "thread_a", height: 100, targetViewportTop: 120 },
+      { id: "thread_b", height: 100, targetViewportTop: 160 },
+      { id: "thread_c", height: 100, targetViewportTop: 500 },
+    ],
+  });
+
+  expect(layout.positions.get("thread_a")).toBe(68);
+  expect(layout.positions.get("thread_b")).toBe(180);
+  expect(layout.positions.get("thread_c")).toBe(448);
+  expect(layout.contentHeight).toBe(564);
+});
+
+test("gives the active rail card priority while preserving surrounding order", () => {
+  const layout = stackedRailItemLayout({
+    activeId: "thread_b",
+    edgePadding: 16,
+    gap: 12,
+    railScrollTop: 0,
+    railViewportHeight: 700,
+    railViewportTop: 52,
+    items: [
+      { id: "thread_a", height: 120, targetViewportTop: 460 },
+      { id: "thread_b", height: 120, targetViewportTop: 260 },
+      { id: "thread_c", height: 120, targetViewportTop: 300 },
+    ],
+  });
+
+  expect(layout.positions.get("thread_b")).toBe(208);
+  expect(layout.positions.get("thread_a")).toBe(76);
+  expect(layout.positions.get("thread_c")).toBe(340);
+});
+
+test("keeps the active rail card with its anchor and moves earlier cards above it", () => {
+  const layout = stackedRailItemLayout({
+    activeId: "thread_c",
+    edgePadding: 16,
+    gap: 12,
+    railScrollTop: 0,
+    railViewportHeight: 500,
+    railViewportTop: 52,
+    items: [
+      { id: "thread_a", height: 180, targetViewportTop: 40 },
+      { id: "thread_b", height: 180, targetViewportTop: 80 },
+      { id: "thread_c", height: 180, targetViewportTop: 120 },
+    ],
+  });
+
+  expect(layout.positions.get("thread_a")).toBe(-316);
+  expect(layout.positions.get("thread_b")).toBe(-124);
+  expect(layout.positions.get("thread_c")).toBe(68);
 });
 
 test("sorts comment threads by live anchor order before stale text positions", () => {

@@ -1,26 +1,97 @@
 export const MISSING_THREAD_ORDER = Number.MAX_SAFE_INTEGER;
 
 export function alignedRailItemTop({
-  edgePadding = 16,
-  itemHeight = 0,
   railScrollTop = 0,
-  railViewportHeight = 0,
   railViewportTop = 0,
   targetViewportTop = 0,
 } = {}) {
-  const safeEdgePadding = Math.max(0, finiteNumber(edgePadding, 0));
-  const safeItemHeight = Math.max(0, finiteNumber(itemHeight, 0));
   const safeRailScrollTop = Math.max(0, finiteNumber(railScrollTop, 0));
-  const safeRailViewportHeight = Math.max(0, finiteNumber(railViewportHeight, 0));
   const safeRailViewportTop = finiteNumber(railViewportTop, 0);
-  const targetTopWithinRail = finiteNumber(targetViewportTop, safeRailViewportTop) - safeRailViewportTop;
-  const minTopWithinRail = safeEdgePadding;
-  const maxTopWithinRail = Math.max(
-    minTopWithinRail,
-    safeRailViewportHeight - safeItemHeight - safeEdgePadding,
-  );
+  return safeRailScrollTop + finiteNumber(targetViewportTop, safeRailViewportTop) - safeRailViewportTop;
+}
 
-  return safeRailScrollTop + clamp(targetTopWithinRail, minTopWithinRail, maxTopWithinRail);
+export function stackedRailItemLayout({
+  activeId = null,
+  edgePadding = 16,
+  gap = 12,
+  items = [],
+  railScrollTop = 0,
+  railViewportHeight = 0,
+  railViewportTop = 0,
+} = {}) {
+  const safeEdgePadding = Math.max(0, finiteNumber(edgePadding, 0));
+  const safeGap = Math.max(0, finiteNumber(gap, 0));
+  const normalizedItems = [...(items ?? [])].map((item) => ({
+    id: item?.id,
+    height: Math.max(0, finiteNumber(item?.height, 0)),
+    targetViewportTop: finiteNumberOrNull(item?.targetViewportTop),
+  }));
+  const positions = new Map();
+
+  if (normalizedItems.length === 0) {
+    return { contentHeight: 0, positions };
+  }
+
+  const fallbackTops = [];
+  let fallbackTop = safeEdgePadding;
+  for (const item of normalizedItems) {
+    fallbackTops.push(fallbackTop);
+    fallbackTop += item.height + safeGap;
+  }
+
+  const desiredTops = normalizedItems.map((item) => {
+    if (item.targetViewportTop === null) return null;
+    return alignedRailItemTop({
+      edgePadding: safeEdgePadding,
+      itemHeight: item.height,
+      railScrollTop,
+      railViewportHeight,
+      railViewportTop,
+      targetViewportTop: item.targetViewportTop,
+    });
+  });
+
+  const activeIndex =
+    activeId === null || activeId === undefined
+      ? -1
+      : normalizedItems.findIndex((item) => item.id === activeId);
+
+  if (activeIndex === -1) {
+    placeForward(normalizedItems, desiredTops, positions, {
+      gap: safeGap,
+      startIndex: 0,
+      startTop: desiredTops[0] ?? safeEdgePadding,
+    });
+  } else {
+    const activeItem = normalizedItems[activeIndex];
+    positions.set(activeItem.id, desiredTops[activeIndex] ?? fallbackTops[activeIndex]);
+
+    for (let index = activeIndex - 1; index >= 0; index -= 1) {
+      const item = normalizedItems[index];
+      const nextItem = normalizedItems[index + 1];
+      const nextTop = positions.get(nextItem.id) ?? fallbackTops[index + 1];
+      const maxTop = nextTop - safeGap - item.height;
+      positions.set(item.id, Math.min(desiredTops[index] ?? maxTop, maxTop));
+    }
+
+    placeForward(normalizedItems, desiredTops, positions, {
+      gap: safeGap,
+      startIndex: activeIndex + 1,
+      startTop:
+        (positions.get(activeItem.id) ?? fallbackTops[activeIndex]) +
+        activeItem.height +
+        safeGap,
+    });
+  }
+
+  let contentHeight = safeEdgePadding;
+  for (const item of normalizedItems) {
+    const top = positions.get(item.id);
+    if (!Number.isFinite(top)) continue;
+    contentHeight = Math.max(contentHeight, top + item.height + safeEdgePadding);
+  }
+
+  return { contentHeight, positions };
 }
 
 export function sortThreadsForRail(threads, liveOrder = new Map()) {
@@ -113,4 +184,18 @@ function clamp(value, min, max) {
 
 function finiteNumber(value, fallback) {
   return Number.isFinite(value) ? value : fallback;
+}
+
+function finiteNumberOrNull(value) {
+  return Number.isFinite(value) ? value : null;
+}
+
+function placeForward(items, desiredTops, positions, { gap, startIndex, startTop }) {
+  let nextTop = startTop;
+  for (let index = startIndex; index < items.length; index += 1) {
+    const item = items[index];
+    const top = Math.max(desiredTops[index] ?? nextTop, nextTop);
+    positions.set(item.id, top);
+    nextTop = top + item.height + gap;
+  }
 }

@@ -1,10 +1,10 @@
 import {
-  alignedRailItemTop,
   collectThreadLiveOrderFromAnchors,
   createProgrammaticScrollGuard,
   openAncestorDetails,
   removeRuntimeOpenedDetails,
   sortThreadsForRail,
+  stackedRailItemLayout,
 } from "./app-helpers.js";
 
 const frame = document.querySelector("#documentFrame");
@@ -51,12 +51,11 @@ let frameViewportCleanup = null;
 let fabTimer = null;
 let pointerSelectionActive = false;
 let localMutationDepth = 0;
-let railAutoFollowPaused = false;
-let railProgrammaticScrollDepth = 0;
 let railRevealFrame = null;
 let railRevealTimer = null;
 
 const RAIL_EDGE_PADDING = 16;
+const RAIL_CARD_GAP = 12;
 
 const frameScrollGuard = createProgrammaticScrollGuard({
   onRestore: (threadId) => {
@@ -87,10 +86,6 @@ editButton.addEventListener("click", () => {
 });
 
 railToggle.addEventListener("click", () => setRailCollapsed(!railCollapsed));
-commentRail.addEventListener("scroll", () => {
-  if (railProgrammaticScrollDepth > 0) return;
-  railAutoFollowPaused = true;
-}, { passive: true });
 
 openButton.addEventListener("click", () => void openViaDialog());
 emptyOpenButton.addEventListener("click", () => void openViaDialog());
@@ -618,10 +613,9 @@ function teardownFrameViewportTracking() {
   frameResizeObserver = null;
 }
 
-function syncFrameViewport({ followRail = false } = {}) {
+function syncFrameViewport() {
   layoutRail();
   repositionSelectionFab();
-  if (followRail) syncRailToFrameViewport();
 }
 
 function setupFrame() {
@@ -669,8 +663,7 @@ function setupFrame() {
       syncFrameViewport();
       return;
     }
-    railAutoFollowPaused = false;
-    syncFrameViewport({ followRail: true });
+    syncFrameViewport();
   };
   win?.addEventListener("scroll", onFrameScroll, { passive: true });
   win?.addEventListener("resize", onViewportChange);
@@ -1099,103 +1092,104 @@ function openComposer() {
 // ---------- Comment rail viewport sync ----------
 //
 // Thread cards stay in document order in the independently scrollable rail.
-// As the iframe scrolls, the rail activates and reveals the thread whose anchor
-// is visible or nearest to the document viewport.
+// As the iframe scrolls, the rail passively repositions cards toward their
+// anchors. Explicit clicks choose which pair gets active-state priority.
 function layoutRail() {
   if (!commentRailInner) return;
   commentRailInner.style.height = "";
+  commentRailInner.classList.remove("rail-aligned");
+  threadsEl.style.height = "";
   composer.style.top = "";
   composer.classList.remove("composer-floating");
   for (const card of threadsEl.querySelectorAll(".thread-card")) {
     card.style.top = "";
   }
-  if (composer.hidden === false) {
-    positionComposerNearPendingAnchor();
-  }
-}
-
-function positionComposerNearPendingAnchor() {
-  if (!pendingSelection?.threadId || !shouldFloatComposer()) return;
+  if (!shouldFloatRailItems()) return;
 
   const doc = frame.contentDocument;
   if (!doc?.body) return;
-
-  const metric = anchorViewportMetric(pendingSelection.threadId, doc);
-  if (!metric) return;
 
   const frameRect = frame.getBoundingClientRect();
   const railRect = commentRail.getBoundingClientRect();
   if (railRect.width <= 0 || railRect.height <= 0) return;
 
-  composer.classList.add("composer-floating");
-  const top = alignedRailItemTop({
+  const layoutItems = railLayoutItems(doc, frameRect);
+  if (layoutItems.length === 0) return;
+
+  commentRailInner.classList.add("rail-aligned");
+  const priorityThreadId = composer.hidden === false ? pendingSelection?.threadId : activeThreadId;
+  const layout = stackedRailItemLayout({
+    activeId: priorityThreadId,
     edgePadding: RAIL_EDGE_PADDING,
-    itemHeight: composer.offsetHeight,
+    gap: RAIL_CARD_GAP,
+    items: layoutItems.map((item) => ({
+      id: item.id,
+      height: item.element.offsetHeight,
+      targetViewportTop: item.targetViewportTop,
+    })),
     railScrollTop: commentRail.scrollTop,
     railViewportHeight: commentRail.clientHeight,
     railViewportTop: railRect.top,
-    targetViewportTop: frameRect.top + metric.top,
   });
 
-  composer.style.top = `${Math.round(top)}px`;
+  for (const item of layoutItems) {
+    const top = layout.positions.get(item.id);
+    if (Number.isFinite(top)) {
+      item.element.style.top = `${Math.round(top)}px`;
+    }
+  }
 
-  const minHeight = top + composer.offsetHeight + RAIL_EDGE_PADDING;
-  if (minHeight > commentRailInner.offsetHeight) {
+  const minHeight = Math.max(commentRail.clientHeight, layout.contentHeight);
+  if (minHeight > 0) {
     commentRailInner.style.height = `${Math.ceil(minHeight)}px`;
   }
 }
 
-function shouldFloatComposer() {
-  return window.matchMedia("(min-width: 941px)").matches && getComputedStyle(commentRail).overflowY !== "visible";
-}
+function railLayoutItems(doc, frameRect) {
+  const items = [];
+  const liveOrder = threadLiveOrder();
 
-function syncRailToFrameViewport({ force = false, behavior = "auto" } = {}) {
-  if (appShell.dataset.rail !== "open") return;
-  if (composer.hidden === false) return;
-  if (railAutoFollowPaused && !force) return;
-  if (commentRail.contains(document.activeElement) && isFormControl(document.activeElement)) return;
-
-  const threadId = threadIdForFrameViewport();
-  if (!threadId) return;
-
-  if (threadId !== activeThreadId) {
-    activateThreadWithoutRender(threadId);
+  if (composer.hidden === false && pendingSelection?.threadId) {
+    const targetViewportTop = targetViewportTopForThread(pendingSelection.threadId, doc, frameRect);
+    if (Number.isFinite(targetViewportTop)) {
+      composer.classList.add("composer-floating");
+      items.push({
+        element: composer,
+        fallbackOrder: -1,
+        id: pendingSelection.threadId,
+        order: liveOrder.get(pendingSelection.threadId),
+        targetViewportTop,
+      });
+    }
   }
-  layoutRail();
-  revealThreadCardInRailSoon(threadId, { behavior });
+
+  Array.from(threadsEl.querySelectorAll(".thread-card[data-thread-id]")).forEach((card, index) => {
+    if (!(card instanceof HTMLElement)) return;
+    const id = card.getAttribute("data-thread-id");
+    if (!id) return;
+    items.push({
+      element: card,
+      fallbackOrder: index,
+      id,
+      order: liveOrder.get(id),
+      targetViewportTop: targetViewportTopForThread(id, doc, frameRect),
+    });
+  });
+
+  return items.sort((left, right) => {
+    const leftOrder = Number.isFinite(left.order) ? left.order : Number.MAX_SAFE_INTEGER;
+    const rightOrder = Number.isFinite(right.order) ? right.order : Number.MAX_SAFE_INTEGER;
+    return leftOrder - rightOrder || left.fallbackOrder - right.fallbackOrder;
+  });
 }
 
-function threadIdForFrameViewport() {
-  const doc = frame.contentDocument;
-  const win = frame.contentWindow;
-  if (!doc?.body || !win) return null;
+function targetViewportTopForThread(threadId, doc, frameRect) {
+  const metric = anchorViewportMetric(threadId, doc);
+  return metric ? frameRect.top + metric.top : null;
+}
 
-  const viewportHeight = win.innerHeight || doc.documentElement.clientHeight || 0;
-  const metrics = sortedThreads()
-    .map((thread, index) => {
-      const metric = anchorViewportMetric(thread.id, doc);
-      return metric ? { ...metric, id: thread.id, index } : null;
-    })
-    .filter(Boolean);
-
-  if (metrics.length === 0) return null;
-
-  const visible = metrics
-    .filter((metric) => metric.bottom >= 0 && metric.top <= viewportHeight)
-    .sort((left, right) => {
-      return Math.max(0, left.top) - Math.max(0, right.top) || left.index - right.index;
-    });
-  if (visible[0]) return visible[0].id;
-
-  const below = metrics
-    .filter((metric) => metric.top >= 0)
-    .sort((left, right) => left.top - right.top || left.index - right.index);
-  if (below[0]) return below[0].id;
-
-  const above = metrics
-    .filter((metric) => metric.bottom < 0)
-    .sort((left, right) => right.bottom - left.bottom || right.index - left.index);
-  return above[0]?.id ?? null;
+function shouldFloatRailItems() {
+  return window.matchMedia("(min-width: 941px)").matches && getComputedStyle(commentRail).overflowY !== "visible";
 }
 
 function anchorViewportMetric(threadId, doc) {
@@ -1241,11 +1235,7 @@ function revealThreadCardInRail(threadId, { behavior = "auto" } = {}) {
   nextTop = Math.max(0, Math.min(maxTop, nextTop));
   if (Math.abs(nextTop - currentTop) < 1) return;
 
-  railProgrammaticScrollDepth += 1;
   commentRail.scrollTo({ top: nextTop, behavior });
-  window.setTimeout(() => {
-    railProgrammaticScrollDepth = Math.max(0, railProgrammaticScrollDepth - 1);
-  }, behavior === "smooth" ? 600 : 80);
 }
 
 function revealThreadCardInRailSoon(threadId, options = {}) {
@@ -1659,7 +1649,6 @@ function deselectThread() {
 }
 
 function selectThread(threadId, keepFocus = false) {
-  railAutoFollowPaused = false;
   activateThreadWithoutRender(threadId);
   layoutRail();
   revealThreadCardInRailSoon(threadId, { behavior: "smooth" });

@@ -708,6 +708,16 @@ textarea:focus {
   gap: 12px;
 }
 
+.comment-rail-inner.rail-aligned .threads {
+  display: block;
+}
+
+.comment-rail-inner.rail-aligned .thread-card {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+}
+
 .thread-card {
   padding: 13px 14px;
   transition: border-color 160ms ease, box-shadow 160ms ease;
