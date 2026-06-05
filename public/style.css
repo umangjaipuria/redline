@@ -107,15 +107,13 @@ button:disabled {
   width: 28px;
   height: 28px;
   flex: none;
-  color: #fff;
-  background: linear-gradient(150deg, var(--red) 0%, var(--red-deep) 100%);
-  border-radius: 8px;
-  box-shadow: 0 3px 9px rgba(196, 54, 29, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  border-radius: 8.5px;
+  box-shadow: 0 2px 6px rgba(33, 28, 21, 0.1);
 }
 
 .brand-mark svg {
-  width: 15px;
-  height: 15px;
+  width: 28px;
+  height: 28px;
 }
 
 .app-name {

@@ -3,7 +3,9 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Redline</title>
+    <title>redline</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <link rel="mask-icon" href="/favicon.svg" color="#c4361d">
     <link rel="stylesheet" href="/fonts.css">
     <link rel="stylesheet" href="/style.css">
   </head>
@@ -12,12 +14,19 @@
       <header class="topbar">
         <div class="brand">
           <span class="brand-mark" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" width="18" height="18">
-              <path d="M5 19 19 5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
-              <path d="M14.5 5H19v4.5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+            <svg viewBox="0 0 32 32" fill="none" width="28" height="28">
+              <defs>
+                <linearGradient id="brandInk" x1="6" y1="6" x2="26" y2="26" gradientUnits="userSpaceOnUse">
+                  <stop stop-color="#df4628"/>
+                  <stop offset="1" stop-color="#a81f0c"/>
+                </linearGradient>
+              </defs>
+              <rect x="1" y="1" width="30" height="30" rx="8.5" fill="#fbf6ed"/>
+              <rect x="1.5" y="1.5" width="29" height="29" rx="8" fill="none" stroke="#000" stroke-opacity="0.07"/>
+              <path d="M7.4 23.2c5.1-3.3 12.2-9.3 18.8-15.4-2.7 5.8-8.1 11.7-13.9 15.4 2.5-.3 5-1.3 7.5-3-2.9 3-6.9 4.9-11.5 4.7-.5 0-.9-1.1-.9-1.7Z" fill="url(#brandInk)"/>
             </svg>
           </span>
-          <div class="app-name">Redline</div>
+          <div class="app-name">redline</div>
           <span id="documentPath" class="document-path"></span>
           <button id="openButton" type="button" class="icon-button open-icon" title="Open file…" aria-label="Open file">
             <svg class="btn-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
