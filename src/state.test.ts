@@ -14,6 +14,7 @@ import {
   readCommentState,
   readDocumentState,
   readDocumentFileState,
+  repairDocumentAnchors,
   resolveDocumentPath,
   resolveThread,
   sidecarPathFor,
@@ -137,6 +138,100 @@ test("text-range comments insert durable inline anchors", () => {
   expect(withComment.threads[0]?.anchor.anchorId).toBe(threadId);
   expect(fs.readFileSync(documentPath, "utf8")).toContain(
     `<span data-redline-anchor="${threadId}">Hello world.</span>`,
+  );
+});
+
+test("text-range comments use explicit anchor ids as thread ids", () => {
+  const documentPath = tempDocument();
+  const withComment = createComment(documentPath, {
+    body: "Tighten this sentence.",
+    author: "User",
+    quote: "Hello world.",
+    anchor: {
+      type: "text-range",
+      anchorId: "thread_anchor_supplied",
+      quote: "Hello world.",
+    },
+  });
+
+  expect(withComment.threads[0]?.id).toBe("thread_anchor_supplied");
+  expect(withComment.threads[0]?.anchor.anchorId).toBe("thread_anchor_supplied");
+  expect(withComment.html).toContain(
+    '<span data-redline-anchor="thread_anchor_supplied">Hello world.</span>',
+  );
+});
+
+test("text-range comments reject mismatched thread and anchor ids", () => {
+  const documentPath = tempDocument();
+
+  expect(() =>
+    createComment(documentPath, {
+      threadId: "thread_outer",
+      body: "Mismatched ids.",
+      quote: "Hello world.",
+      anchor: {
+        type: "text-range",
+        anchorId: "thread_inner",
+        quote: "Hello world.",
+      },
+    }),
+  ).toThrow("threadId and anchor.anchorId must match");
+});
+
+test("text-range comments reject unmappable quotes instead of saving spanless anchors", () => {
+  const documentPath = tempDocument();
+
+  expect(() =>
+    createComment(documentPath, {
+      body: "Missing target.",
+      quote: "Missing target text.",
+      anchor: {
+        type: "text-range",
+        quote: "Missing target text.",
+      },
+    }),
+  ).toThrow("Text-range comment could not be anchored");
+});
+
+test("bare text-range comments require a unique quote before inserting an anchor", () => {
+  const documentPath = tempDocument();
+  fs.writeFileSync(
+    documentPath,
+    "<!doctype html><html><body><p>Hello world.</p><p>Hello world.</p></body></html>",
+  );
+
+  expect(() =>
+    createComment(documentPath, {
+      body: "Ambiguous target.",
+      quote: "Hello world.",
+      anchor: {
+        type: "text-range",
+        quote: "Hello world.",
+      },
+    }),
+  ).toThrow("Text-range comment could not be anchored");
+});
+
+test("text-range comments can anchor uniquely matched css-transformed casing", () => {
+  const documentPath = tempDocument();
+  fs.writeFileSync(
+    documentPath,
+    '<!doctype html><html><body><div class="label">columns (River/Hermes-shaped)</div></body></html>',
+  );
+
+  const withComment = createComment(documentPath, {
+    threadId: "thread_columns_label",
+    body: "Explain the table.",
+    quote: "COLUMNS (RIVER/HERMES-SHAPED)",
+    anchor: {
+      type: "text-range",
+      quote: "COLUMNS (RIVER/HERMES-SHAPED)",
+    },
+  });
+
+  expect(withComment.threads[0]?.anchor.anchorId).toBe("thread_columns_label");
+  expect(withComment.html).toContain(
+    '<span data-redline-anchor="thread_columns_label">columns (River/Hermes-shaped)</span>',
   );
 });
 
@@ -335,6 +430,7 @@ test("agent updates insert durable inline anchors for new text comments", () => 
   const updated = applyAgentUpdate(documentPath, {
     comments: [
       {
+        threadId: "thread_agent_supplied",
         body: "Anchor this note.",
         author: "Codex",
         quote: "Hello world.",
@@ -346,10 +442,81 @@ test("agent updates insert durable inline anchors for new text comments", () => 
       },
     ],
   });
-  const threadId = updated.threads[0]?.id ?? "";
 
-  expect(updated.threads[0]?.anchor.anchorId).toBe(threadId);
-  expect(updated.html).toContain(`<span data-redline-anchor="${threadId}">Hello world.</span>`);
+  expect(updated.threads[0]?.id).toBe("thread_agent_supplied");
+  expect(updated.threads[0]?.anchor.anchorId).toBe("thread_agent_supplied");
+  expect(updated.html).toContain(
+    '<span data-redline-anchor="thread_agent_supplied">Hello world.</span>',
+  );
+});
+
+test("agent updates reject mismatched comment ids before writing partial state", () => {
+  const documentPath = tempDocument();
+
+  expect(() =>
+    applyAgentUpdate(documentPath, {
+      comments: [
+        {
+          threadId: "thread_outer",
+          body: "Mismatched ids.",
+          quote: "Hello world.",
+          anchor: {
+            type: "text-range",
+            anchorId: "thread_inner",
+            quote: "Hello world.",
+          },
+        },
+      ],
+    }),
+  ).toThrow("threadId and anchor.anchorId must match");
+
+  expect(readDocumentState(documentPath).threads).toHaveLength(0);
+  expect(fs.readFileSync(documentPath, "utf8")).not.toContain("data-redline-anchor");
+});
+
+test("repairing document anchors materializes old spanless text threads", () => {
+  const documentPath = tempDocument();
+  const embeddedState = {
+    schemaVersion: 1,
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    threads: [
+      {
+        id: "thread_current",
+        anchor: {
+          type: "text-range",
+          anchorId: "thread_old",
+          quote: "Hello world.",
+          prefix: "",
+          suffix: "",
+        },
+        quote: "Hello world.",
+        author: "Codex",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        messages: [
+          {
+            id: "message_old",
+            author: "Codex",
+            body: "Old spanless comment.",
+            createdAt: "2026-01-01T00:00:00.000Z",
+          },
+        ],
+      },
+    ],
+  };
+  fs.writeFileSync(
+    documentPath,
+    `<!doctype html><html><head><script type="application/json" id="redline-state">${JSON.stringify(
+      embeddedState,
+    )}</script></head><body><p>Hello world.</p></body></html>`,
+  );
+
+  const repaired = repairDocumentAnchors(documentPath);
+
+  expect(repaired.threads[0]?.id).toBe("thread_current");
+  expect(repaired.threads[0]?.anchor.anchorId).toBe("thread_current");
+  expect(repaired.html).toContain('<span data-redline-anchor="thread_current">Hello world.</span>');
+  expect(repaired.html).not.toContain("thread_old");
 });
 
 test("agent updates can add comments and resolve inline anchors", () => {

@@ -8,6 +8,7 @@ import {
   readCommentState,
   readDocumentFileState,
   readDocumentState,
+  repairDocumentAnchors,
   resolveDocumentPath,
   resolveThread,
   updateCommentMessage,
@@ -113,6 +114,12 @@ function run(commandName: string | undefined, argsForCommand: string[]): void {
     if (!payloadPath) throw new Error("apply requires a JSON payload file.");
     const payload = JSON.parse(fs.readFileSync(path.resolve(payloadPath), "utf8")) as AgentUpdateInput;
     printJson(applyAgentUpdate(documentPath, payload));
+    return;
+  }
+
+  if (commandName === "repair-anchors") {
+    const documentPath = resolveRequiredDocument(argsForCommand[0]);
+    printJson(repairDocumentAnchors(documentPath));
     return;
   }
 
@@ -288,6 +295,7 @@ function printHelp(): void {
   bun src/agent.ts edit-comment <document.html> <thread-id> <message-id> <message>
   bun src/agent.ts resolve <document.html> <thread-id>
   bun src/agent.ts apply <document.html> <payload.json>
+  bun src/agent.ts repair-anchors <document.html>
   bun src/agent.ts update-html <document.html> <updated.html>
 
 The apply payload may include:

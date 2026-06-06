@@ -237,7 +237,7 @@ export function createComment(
   const html = typeof input.html === "string" ? input.html : currentHtml;
   const reviewState = readReviewState(absoluteDocumentPath, currentHtml);
   const now = new Date().toISOString();
-  const id = normalizeId(input.threadId, "thread") ?? newId("thread");
+  const id = idForNewComment(input);
   if (reviewState.threads.some((thread) => thread.id === id)) {
     throw new Error(`Comment thread already exists: ${id}`);
   }
@@ -249,7 +249,9 @@ export function createComment(
   };
 
   const quote = normalizeQuote(input.quote ?? input.anchor.quote ?? "");
-  const { anchor, html: htmlWithAnchor } = prepareCommentAnchor(html, input.anchor, quote, id);
+  const { anchor, html: htmlWithAnchor } = prepareCommentAnchor(html, input.anchor, quote, id, {
+    requireInlineAnchor: true,
+  });
   reviewState.threads.push({
     id,
     anchor,
@@ -392,10 +394,15 @@ export function applyAgentUpdate(
 
   for (const comment of input.comments ?? []) {
     const body = normalizeBody(comment.body, "Comment body is required.");
-    const id = newId("thread");
+    const id = idForNewComment(comment);
+    if (reviewState.threads.some((thread) => thread.id === id)) {
+      throw new Error(`Comment thread already exists: ${id}`);
+    }
     const author = normalizeAuthor(comment.author, "AI");
     const quote = normalizeQuote(comment.quote ?? comment.anchor.quote ?? "");
-    const prepared = prepareCommentAnchor(nextHtml, comment.anchor, quote, id);
+    const prepared = prepareCommentAnchor(nextHtml, comment.anchor, quote, id, {
+      requireInlineAnchor: true,
+    });
     nextHtml = prepared.html;
     reviewState.threads.push({
       id,
@@ -433,6 +440,20 @@ export function applyAgentUpdate(
     );
   }
 
+  return readDocumentState(absoluteDocumentPath);
+}
+
+export function repairDocumentAnchors(documentPath: string): DocumentState {
+  const absoluteDocumentPath = path.resolve(documentPath);
+  const html = readDocumentHtml(absoluteDocumentPath);
+  const reviewState = readReviewState(absoluteDocumentPath, html);
+  const repaired = materializeReviewAnchors(html, reviewState.threads);
+  if (repaired.changed) {
+    writeHtmlWithReviewState(absoluteDocumentPath, repaired.html, {
+      updatedAt: new Date().toISOString(),
+      threads: repaired.threads,
+    });
+  }
   return readDocumentState(absoluteDocumentPath);
 }
 
@@ -513,12 +534,13 @@ function writeHtmlWithReviewState(
   reviewState: Omit<EmbeddedCommentState, "schemaVersion">,
 ): void {
   const absoluteDocumentPath = path.resolve(documentPath);
+  const repaired = materializeReviewAnchors(html, reviewState.threads.map(normalizeThread));
   const normalized: EmbeddedCommentState = {
     schemaVersion,
     updatedAt: reviewState.updatedAt || new Date().toISOString(),
-    threads: reviewState.threads.map(normalizeThread),
+    threads: repaired.threads.map(normalizeThread),
   };
-  writeFileAtomic(absoluteDocumentPath, injectEmbeddedReviewState(normalizeReviewHtml(html), normalized));
+  writeFileAtomic(absoluteDocumentPath, injectEmbeddedReviewState(normalizeReviewHtml(repaired.html), normalized));
   fs.rmSync(sidecarPathFor(absoluteDocumentPath), { force: true });
   fs.rmSync(legacySidecarPathFor(absoluteDocumentPath), { force: true });
 }
@@ -568,18 +590,28 @@ function anchorIdsFor(threads: CommentThread[]): string[] {
     .filter((id): id is string => id.length > 0);
 }
 
+function idForNewComment(input: CreateCommentInput): string {
+  const threadId = normalizeId(input.threadId, "thread") ?? undefined;
+  const anchorId = normalizeId(input.anchor?.anchorId, "thread") ?? undefined;
+  if (threadId && anchorId && threadId !== anchorId) {
+    throw new Error("threadId and anchor.anchorId must match for anchored comments.");
+  }
+  return threadId ?? anchorId ?? newId("thread");
+}
+
 function prepareCommentAnchor(
   html: string,
   inputAnchor: CommentAnchor,
   quote: string,
   threadId: string,
+  options: { requireInlineAnchor?: boolean } = {},
 ): { anchor: CommentAnchor; html: string } {
   const initialAnchor = normalizeAnchor(inputAnchor);
   if (initialAnchor.type !== "text-range") {
     return { anchor: initialAnchor, html };
   }
 
-  const anchorId = initialAnchor.anchorId ?? threadId;
+  const anchorId = threadId;
   const anchor: CommentAnchor = { ...initialAnchor, anchorId };
   if (hasInlineAnchor(html, anchorId)) {
     return { anchor, html };
@@ -587,13 +619,73 @@ function prepareCommentAnchor(
 
   const range = findTextRangeForAnchor(html, anchor, quote);
   if (!range) {
+    if (options.requireInlineAnchor) {
+      throw new Error("Text-range comment could not be anchored in the document.");
+    }
+    return { anchor, html };
+  }
+
+  const htmlWithAnchor = insertInlineAnchor(html, anchorId, range);
+  if (!htmlWithAnchor) {
+    if (options.requireInlineAnchor) {
+      throw new Error("Text-range comment could not be anchored in the document.");
+    }
     return { anchor, html };
   }
 
   return {
     anchor,
-    html: insertInlineAnchor(html, anchorId, range) ?? html,
+    html: htmlWithAnchor,
   };
+}
+
+function materializeReviewAnchors(
+  html: string,
+  threads: CommentThread[],
+): { html: string; threads: CommentThread[]; changed: boolean } {
+  let nextHtml = html;
+  let nextThreads = threads;
+  let changed = false;
+
+  for (const thread of threads) {
+    if (thread.anchor.type !== "text-range") continue;
+
+    const anchorId = thread.anchor.anchorId || thread.id;
+    if (hasInlineAnchor(nextHtml, thread.id)) {
+      if (thread.anchor.anchorId !== thread.id) {
+        nextThreads = replaceThreadAnchor(nextThreads, thread.id, { ...thread.anchor, anchorId: thread.id });
+        changed = true;
+      }
+      continue;
+    }
+
+    if (anchorId !== thread.id && hasInlineAnchor(nextHtml, anchorId)) {
+      nextHtml = renameInlineAnchor(nextHtml, anchorId, thread.id);
+      nextThreads = replaceThreadAnchor(nextThreads, thread.id, { ...thread.anchor, anchorId: thread.id });
+      changed = true;
+      continue;
+    }
+
+    const range = findTextRangeForAnchor(nextHtml, thread.anchor, thread.quote);
+    if (!range) continue;
+
+    const htmlWithAnchor = insertInlineAnchor(nextHtml, thread.id, range);
+    if (!htmlWithAnchor) continue;
+
+    nextHtml = htmlWithAnchor;
+    nextThreads = replaceThreadAnchor(nextThreads, thread.id, { ...thread.anchor, anchorId: thread.id });
+    changed = true;
+  }
+
+  return { html: nextHtml, threads: nextThreads, changed };
+}
+
+function replaceThreadAnchor(
+  threads: CommentThread[],
+  threadId: string,
+  anchor: CommentAnchor,
+): CommentThread[] {
+  return threads.map((thread) => (thread.id === threadId ? { ...thread, anchor } : thread));
 }
 
 function hasInlineAnchor(html: string, anchorId: string): boolean {
@@ -646,12 +738,27 @@ function findTextRangeForAnchor(
   const contextual = findContextualTextRange(text, normalizedQuote, anchor.prefix, anchor.suffix);
   if (contextual) return contextual;
 
-  const exact = text.indexOf(normalizedQuote);
-  if (exact !== -1) {
-    return { start: exact, end: exact + normalizedQuote.length };
-  }
+  const exact = findUniqueTextRange(text, normalizedQuote);
+  if (exact) return exact;
+
+  const caseInsensitive = findCaseInsensitiveTextRange(text, normalizedQuote);
+  if (caseInsensitive) return caseInsensitive;
 
   return findNormalizedTextRange(text, normalizedQuote);
+}
+
+function findUniqueTextRange(text: string, quote: string): HtmlTextRange | null {
+  const ranges: HtmlTextRange[] = [];
+  let startAt = 0;
+
+  while (startAt <= text.length) {
+    const start = text.indexOf(quote, startAt);
+    if (start === -1) break;
+    ranges.push({ start, end: start + quote.length });
+    startAt = start + Math.max(quote.length, 1);
+  }
+
+  return ranges.length === 1 ? ranges[0] ?? null : null;
 }
 
 function findContextualTextRange(
@@ -682,10 +789,38 @@ function findContextualTextRange(
 function findNormalizedTextRange(text: string, quote: string): HtmlTextRange | null {
   const normalizedText = text.replace(/\s+/g, " ");
   const normalizedQuote = quote.replace(/\s+/g, " ");
-  const normalizedStart = normalizedText.indexOf(normalizedQuote);
-  if (normalizedStart === -1) return null;
+  const matches: HtmlTextRange[] = [];
+  let startAt = 0;
 
-  return mapNormalizedTextRange(text, normalizedStart, normalizedStart + normalizedQuote.length);
+  while (startAt <= normalizedText.length) {
+    const normalizedStart = normalizedText.indexOf(normalizedQuote, startAt);
+    if (normalizedStart === -1) break;
+    const mapped = mapNormalizedTextRange(
+      text,
+      normalizedStart,
+      normalizedStart + normalizedQuote.length,
+    );
+    if (mapped) matches.push(mapped);
+    startAt = normalizedStart + Math.max(normalizedQuote.length, 1);
+  }
+
+  return matches.length === 1 ? matches[0] ?? null : null;
+}
+
+function findCaseInsensitiveTextRange(text: string, quote: string): HtmlTextRange | null {
+  const haystack = text.toLocaleLowerCase();
+  const needle = quote.toLocaleLowerCase();
+  const ranges: HtmlTextRange[] = [];
+  let startAt = 0;
+
+  while (startAt <= haystack.length) {
+    const start = haystack.indexOf(needle, startAt);
+    if (start === -1) break;
+    ranges.push({ start, end: start + quote.length });
+    startAt = start + Math.max(quote.length, 1);
+  }
+
+  return ranges.length === 1 ? ranges[0] ?? null : null;
 }
 
 function mapNormalizedTextRange(
@@ -724,6 +859,19 @@ function insertInlineAnchor(html: string, anchorId: string, range: HtmlTextRange
   return `${html.slice(0, indices.start)}${open}${html.slice(indices.start, indices.end)}</span>${html.slice(
     indices.end,
   )}`;
+}
+
+function renameInlineAnchor(html: string, fromAnchorId: string, toAnchorId: string): string {
+  let nextHtml = html;
+  for (const pattern of inlineAnchorPattern(fromAnchorId)) {
+    nextHtml = nextHtml.replace(pattern, (match) =>
+      match.replace(
+        /\bdata-(?:redline|coauthor)-anchor\s*=\s*(["'])([^"']+)\1/i,
+        `data-redline-anchor=$1${toAnchorId}$1`,
+      ),
+    );
+  }
+  return nextHtml;
 }
 
 function htmlIndicesForTextRange(html: string, range: HtmlTextRange): HtmlTextRange | null {
