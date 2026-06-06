@@ -195,7 +195,7 @@ button.open-icon:disabled {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   justify-content: flex-end;
 }
 
@@ -206,9 +206,9 @@ button.open-icon:disabled {
   background: var(--line);
 }
 
-/* The rail toggle is hidden until a comment exists; drop the divider that
-   precedes it too, so no stray separator floats at the right edge. */
-.toolbar-divider:has(+ .rail-toggle[hidden]) {
+/* The comment controls are hidden until a comment exists; drop the divider that
+   precedes them too, so no stray separator floats at the right edge. */
+.comment-controls-divider:has(+ .comment-controls[hidden]) {
   display: none;
 }
 
@@ -359,6 +359,37 @@ button.open-icon:disabled {
 
 .rail-toggle.active .rail-toggle-fill {
   display: inline;
+}
+
+.comment-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.comment-nav-button {
+  justify-content: center;
+  width: 32px;
+  padding: 0;
+}
+
+.comment-nav-button .btn-icon {
+  width: 15px;
+  height: 15px;
+}
+
+.comment-nav-button:disabled {
+  border-color: var(--line-soft);
+  background: var(--panel-raised);
+  color: var(--ink-faint);
+  opacity: 0.45;
+  box-shadow: none;
+}
+
+.comment-nav-button:disabled:hover {
+  border-color: var(--line-soft);
+  background: var(--panel-raised);
+  color: var(--ink-faint);
 }
 
 .count-badge {
@@ -973,6 +1004,7 @@ textarea:focus {
 
   .toolbar {
     width: 100%;
+    flex-wrap: wrap;
     justify-content: flex-start;
   }
 

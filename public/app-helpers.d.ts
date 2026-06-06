@@ -69,6 +69,23 @@ export function collectThreadLiveOrderFromAnchors(
   root?: QueryRootLike<AnchorElementLike> | null,
 ): Map<string, number>;
 
+export interface CommentNavigationState {
+  hasComments: boolean;
+  nextDisabled: boolean;
+  previousDisabled: boolean;
+}
+
+export function commentNavigationState(
+  orderedIds?: readonly string[] | null,
+  activeId?: string | null,
+): CommentNavigationState;
+
+export function commentNavigationTarget(
+  orderedIds?: readonly string[] | null,
+  activeId?: string | null,
+  direction?: "previous" | "next",
+): string | null;
+
 export function openAncestorDetails(element?: DetailsElementLike | null): void;
 
 export function removeRuntimeOpenedDetails(root?: QueryRootLike<DetailsElementLike> | null): void;

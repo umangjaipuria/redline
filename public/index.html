@@ -61,17 +61,33 @@
             </svg>
             <span class="btn-label">Edit</span>
           </button>
-          <span class="toolbar-divider" aria-hidden="true"></span>
-          <button id="railToggle" type="button" class="ghost-button rail-toggle" hidden
-            title="Hide comments" aria-pressed="false">
-            <svg class="btn-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <rect x="3.5" y="5" width="17" height="14" rx="2.2" stroke="currentColor" stroke-width="1.8"/>
-              <path d="M14.5 5v14" stroke="currentColor" stroke-width="1.8"/>
-              <path class="rail-toggle-fill" d="M14.9 5.4h3.4a1.8 1.8 0 0 1 1.8 1.8v9.6a1.8 1.8 0 0 1-1.8 1.8h-3.4z" fill="currentColor" stroke="none"/>
-            </svg>
-            <span class="btn-label">Comments</span>
-            <span id="railToggleCount" class="count-badge">0</span>
-          </button>
+          <span class="toolbar-divider comment-controls-divider" aria-hidden="true"></span>
+          <div id="commentControls" class="comment-controls" hidden>
+            <button id="previousCommentButton" type="button" class="ghost-button comment-nav-button"
+              title="Previous comment" aria-label="Previous comment">
+              <svg class="btn-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="m11 7-5 5 5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="m18 7-5 5 5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+            <button id="railToggle" type="button" class="ghost-button rail-toggle"
+              title="Hide comments" aria-pressed="false">
+              <svg class="btn-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <rect x="3.5" y="5" width="17" height="14" rx="2.2" stroke="currentColor" stroke-width="1.8"/>
+                <path d="M14.5 5v14" stroke="currentColor" stroke-width="1.8"/>
+                <path class="rail-toggle-fill" d="M14.9 5.4h3.4a1.8 1.8 0 0 1 1.8 1.8v9.6a1.8 1.8 0 0 1-1.8 1.8h-3.4z" fill="currentColor" stroke="none"/>
+              </svg>
+              <span class="btn-label">Comments</span>
+              <span id="railToggleCount" class="count-badge">0</span>
+            </button>
+            <button id="nextCommentButton" type="button" class="ghost-button comment-nav-button"
+              title="Next comment" aria-label="Next comment">
+              <svg class="btn-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="m6 7 5 5-5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="m13 7 5 5-5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+          </div>
         </div>
       </header>
 

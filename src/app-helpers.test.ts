@@ -2,6 +2,8 @@ import { expect, test } from "bun:test";
 import {
   alignedRailItemTop,
   collectThreadLiveOrderFromAnchors,
+  commentNavigationState,
+  commentNavigationTarget,
   createProgrammaticScrollGuard,
   openAncestorDetails,
   removeRuntimeOpenedDetails,
@@ -211,6 +213,38 @@ test("collects first visible anchor order from highlighted frame nodes", () => {
     ["thread_b", 1],
     ["thread_c", 2],
   ]);
+});
+
+test("comment navigation starts at the first comment when none is active", () => {
+  const ordered = ["thread_a", "thread_b", "thread_c"];
+
+  expect(commentNavigationState(ordered, null)).toEqual({
+    hasComments: true,
+    nextDisabled: false,
+    previousDisabled: false,
+  });
+  expect(commentNavigationTarget(ordered, null, "previous")).toBe("thread_a");
+  expect(commentNavigationTarget(ordered, null, "next")).toBe("thread_a");
+});
+
+test("comment navigation disables at document-order ends", () => {
+  const ordered = ["thread_a", "thread_b", "thread_c"];
+
+  expect(commentNavigationState(ordered, "thread_a")).toEqual({
+    hasComments: true,
+    nextDisabled: false,
+    previousDisabled: true,
+  });
+  expect(commentNavigationTarget(ordered, "thread_a", "previous")).toBeNull();
+  expect(commentNavigationTarget(ordered, "thread_a", "next")).toBe("thread_b");
+
+  expect(commentNavigationState(ordered, "thread_c")).toEqual({
+    hasComments: true,
+    nextDisabled: true,
+    previousDisabled: false,
+  });
+  expect(commentNavigationTarget(ordered, "thread_c", "previous")).toBe("thread_b");
+  expect(commentNavigationTarget(ordered, "thread_c", "next")).toBeNull();
 });
 
 test("opens closed ancestor details so hidden anchors can be revealed", () => {

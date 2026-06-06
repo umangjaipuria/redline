@@ -1,5 +1,7 @@
 import {
   collectThreadLiveOrderFromAnchors,
+  commentNavigationState,
+  commentNavigationTarget,
   createProgrammaticScrollGuard,
   openAncestorDetails,
   removeRuntimeOpenedDetails,
@@ -27,6 +29,9 @@ const commentRail = document.querySelector(".comment-rail");
 const commentRailInner = document.querySelector(".comment-rail-inner");
 const railToggle = document.querySelector("#railToggle");
 const railToggleCount = document.querySelector("#railToggleCount");
+const commentControls = document.querySelector("#commentControls");
+const previousCommentButton = document.querySelector("#previousCommentButton");
+const nextCommentButton = document.querySelector("#nextCommentButton");
 const openButton = document.querySelector("#openButton");
 const selectionFab = document.querySelector("#selectionFab");
 const emptyState = document.querySelector("#emptyState");
@@ -47,12 +52,16 @@ let activeEditableElement = null;
 let anchorStatusReady = false;
 let anchoredThreadIds = new Set();
 let frameResizeObserver = null;
+let frameViewportFrame = null;
+let pendingFrameRevealThreadId = null;
 let frameViewportCleanup = null;
 let fabTimer = null;
 let pointerSelectionActive = false;
 let localMutationDepth = 0;
 let railRevealFrame = null;
 let railRevealTimer = null;
+let railScrollFrame = null;
+let railScrollToken = 0;
 
 const RAIL_EDGE_PADDING = 16;
 const RAIL_CARD_GAP = 12;
@@ -62,8 +71,8 @@ const frameScrollGuard = createProgrammaticScrollGuard({
     if (activeThreadId !== threadId) {
       activateThreadWithoutRender(threadId);
     }
-    layoutRail();
-    revealThreadCardInRailSoon(threadId, { behavior: "smooth" });
+    syncFrameViewport();
+    revealThreadCardInRail(threadId);
   },
 });
 
@@ -88,6 +97,8 @@ editButton.addEventListener("click", () => {
 });
 
 railToggle.addEventListener("click", () => setRailCollapsed(!railCollapsed));
+previousCommentButton.addEventListener("click", () => jumpComment("previous"));
+nextCommentButton.addEventListener("click", () => jumpComment("next"));
 
 openButton.addEventListener("click", () => void openViaDialog());
 emptyOpenButton.addEventListener("click", () => void openViaDialog());
@@ -462,11 +473,13 @@ function updateRail() {
 
   const open = mode === "open";
   appShell.dataset.rail = mode;
+  commentControls.hidden = threadCount === 0;
   railToggle.hidden = threadCount === 0;
   railToggle.setAttribute("aria-pressed", open ? "true" : "false");
   railToggle.classList.toggle("active", open);
   railToggle.title = open ? "Hide comments" : "Show comments";
   railToggleCount.textContent = String(threadCount);
+  updateCommentNavigation();
   layoutRail();
 }
 
@@ -611,6 +624,8 @@ function renderFrame() {
 function teardownFrameViewportTracking() {
   frameViewportCleanup?.();
   frameViewportCleanup = null;
+  cancelFrameViewportSync();
+  cancelRailScrollAnimation();
   frameResizeObserver?.disconnect();
   frameResizeObserver = null;
 }
@@ -618,6 +633,31 @@ function teardownFrameViewportTracking() {
 function syncFrameViewport() {
   layoutRail();
   repositionSelectionFab();
+}
+
+function scheduleFrameViewportSync({ revealThreadId = null } = {}) {
+  if (revealThreadId) {
+    pendingFrameRevealThreadId = revealThreadId;
+  }
+  if (frameViewportFrame !== null) return;
+
+  frameViewportFrame = requestAnimationFrame(() => {
+    frameViewportFrame = null;
+    const revealThreadId = pendingFrameRevealThreadId;
+    pendingFrameRevealThreadId = null;
+    syncFrameViewport();
+    if (revealThreadId && activeThreadId === revealThreadId) {
+      revealThreadCardInRail(revealThreadId);
+    }
+  });
+}
+
+function cancelFrameViewportSync() {
+  if (frameViewportFrame !== null) {
+    cancelAnimationFrame(frameViewportFrame);
+    frameViewportFrame = null;
+  }
+  pendingFrameRevealThreadId = null;
 }
 
 function setupFrame() {
@@ -662,7 +702,7 @@ function setupFrame() {
   const onFrameScroll = () => {
     if (!trackingActive) return;
     if (frameScrollGuard.isActive()) {
-      repositionSelectionFab();
+      scheduleFrameViewportSync({ revealThreadId: activeThreadId });
       return;
     }
     syncFrameViewport();
@@ -1248,7 +1288,46 @@ function revealThreadCardInRail(threadId, { behavior = "auto" } = {}) {
   nextTop = Math.max(0, Math.min(maxTop, nextTop));
   if (Math.abs(nextTop - currentTop) < 1) return;
 
-  commentRail.scrollTo({ top: nextTop, behavior });
+  if (behavior === "smooth") {
+    animateRailScrollTo(nextTop);
+  } else {
+    cancelRailScrollAnimation();
+    commentRail.scrollTo({ top: nextTop, behavior: "auto" });
+  }
+}
+
+function animateRailScrollTo(targetTop) {
+  cancelRailScrollAnimation();
+  const startTop = commentRail.scrollTop;
+  const distance = targetTop - startTop;
+  if (Math.abs(distance) < 1) return;
+
+  const duration = 420;
+  const token = ++railScrollToken;
+  let startedAt = null;
+
+  const step = (timestamp) => {
+    if (token !== railScrollToken) return;
+    startedAt ??= timestamp;
+    const progress = Math.min(1, (timestamp - startedAt) / duration);
+    const eased = 1 - Math.pow(1 - progress, 3);
+    commentRail.scrollTop = startTop + distance * eased;
+    if (progress < 1) {
+      railScrollFrame = requestAnimationFrame(step);
+      return;
+    }
+    railScrollFrame = null;
+  };
+
+  railScrollFrame = requestAnimationFrame(step);
+}
+
+function cancelRailScrollAnimation() {
+  railScrollToken += 1;
+  if (railScrollFrame !== null) {
+    cancelAnimationFrame(railScrollFrame);
+    railScrollFrame = null;
+  }
 }
 
 function revealThreadCardInRailSoon(threadId, options = {}) {
@@ -1264,6 +1343,7 @@ function revealThreadCardInRailSoon(threadId, options = {}) {
 }
 
 function cancelRailReveal() {
+  cancelRailScrollAnimation();
   if (railRevealFrame != null) {
     cancelAnimationFrame(railRevealFrame);
     railRevealFrame = null;
@@ -1342,6 +1422,25 @@ function getAuthorName() {
 
 function sortedThreads() {
   return sortThreadsForRail(state?.threads ?? [], threadLiveOrder());
+}
+
+function sortedThreadIds() {
+  return sortedThreads().map((thread) => thread.id);
+}
+
+function jumpComment(direction) {
+  const targetId = commentNavigationTarget(sortedThreadIds(), activeThreadId, direction);
+  if (!targetId) {
+    updateCommentNavigation();
+    return;
+  }
+  selectThread(targetId);
+}
+
+function updateCommentNavigation() {
+  const navigation = commentNavigationState(sortedThreadIds(), activeThreadId);
+  previousCommentButton.disabled = navigation.previousDisabled;
+  nextCommentButton.disabled = navigation.nextDisabled;
 }
 
 function threadLiveOrder() {
@@ -1604,7 +1703,7 @@ function closeReplyForm(form) {
 }
 
 function deselectThreadIfOutsideComment(target) {
-  if (target?.closest?.(".thread-card")) return;
+  if (target?.closest?.(".thread-card, .comment-controls")) return;
   deselectThread();
 }
 
@@ -1664,6 +1763,7 @@ function deselectThread() {
     card.classList.remove("active");
   }
   syncHighlightSelection();
+  updateCommentNavigation();
   layoutRail();
 }
 
@@ -1676,9 +1776,10 @@ function selectThread(threadId, keepFocus = false) {
   }
 
   cancelRailReveal();
+  layoutRail();
+  revealThreadCardInRailSoon(threadId, { behavior: "smooth" });
   if (!scrollToThreadAnchor(threadId)) {
-    layoutRail();
-    revealThreadCardInRailSoon(threadId, { behavior: "smooth" });
+    return;
   }
 }
 
@@ -1688,6 +1789,7 @@ function activateThreadWithoutRender(threadId) {
     card.classList.toggle("active", card.getAttribute("data-thread-id") === threadId);
   }
   syncHighlightSelection();
+  updateCommentNavigation();
 }
 
 async function resolveComment(threadId) {

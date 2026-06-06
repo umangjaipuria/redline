@@ -122,6 +122,40 @@ export function collectThreadLiveOrderFromAnchors(root) {
   return order;
 }
 
+export function commentNavigationState(orderedIds = [], activeId = null) {
+  const ordered = uniqueThreadIds(orderedIds);
+  const activeIndex = activeId === null || activeId === undefined ? -1 : ordered.indexOf(activeId);
+  const hasActive = activeIndex !== -1;
+  return {
+    hasComments: ordered.length > 0,
+    nextDisabled: ordered.length === 0 || (hasActive && activeIndex === ordered.length - 1),
+    previousDisabled: ordered.length === 0 || (hasActive && activeIndex === 0),
+  };
+}
+
+export function commentNavigationTarget(orderedIds = [], activeId = null, direction = "next") {
+  const ordered = uniqueThreadIds(orderedIds);
+  if (ordered.length === 0) return null;
+
+  const activeIndex = activeId === null || activeId === undefined ? -1 : ordered.indexOf(activeId);
+  if (activeIndex === -1) return ordered[0];
+
+  const offset = direction === "previous" ? -1 : 1;
+  const targetIndex = clamp(activeIndex + offset, 0, ordered.length - 1);
+  return targetIndex === activeIndex ? null : ordered[targetIndex];
+}
+
+function uniqueThreadIds(orderedIds = []) {
+  const ordered = [];
+  const seenOrdered = new Set();
+  for (const id of orderedIds ?? []) {
+    if (!id || seenOrdered.has(id)) continue;
+    seenOrdered.add(id);
+    ordered.push(id);
+  }
+  return ordered;
+}
+
 export function openAncestorDetails(element) {
   let current = element?.parentElement;
   while (current) {
