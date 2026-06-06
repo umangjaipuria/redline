@@ -72,6 +72,54 @@ test("comment helper accepts valid explicit thread ids", async () => {
   expect(payload.threads[0]?.anchor.textPosition).toEqual({ start: 0, end: 12 });
 });
 
+test("comment helper records supplied agent author", async () => {
+  const proc = Bun.spawn(
+    [
+      "bun",
+      agentPath,
+      "comment",
+      tempDocument(),
+      "Hello world.",
+      "Needs a note.",
+      "--author",
+      "Codex",
+    ],
+    {
+      cwd: projectRoot,
+      stderr: "pipe",
+      stdout: "pipe",
+    },
+  );
+
+  expect(await proc.exited).toBe(0);
+  const payload = await new Response(proc.stdout).json();
+  expect(payload.threads[0]?.messages[0]?.author).toBe("Codex");
+});
+
+test("comment helper falls back to AI for a blank agent author", async () => {
+  const proc = Bun.spawn(
+    [
+      "bun",
+      agentPath,
+      "comment",
+      tempDocument(),
+      "Hello world.",
+      "Needs a note.",
+      "--author",
+      "  ",
+    ],
+    {
+      cwd: projectRoot,
+      stderr: "pipe",
+      stdout: "pipe",
+    },
+  );
+
+  expect(await proc.exited).toBe(0);
+  const payload = await new Response(proc.stdout).json();
+  expect(payload.threads[0]?.messages[0]?.author).toBe("AI");
+});
+
 test("comment helper rejects ambiguous quoted text without an occurrence", async () => {
   const documentPath = tempDocument(
     "<!doctype html><html><body><p>Hello world.</p><p>Hello world.</p></body></html>",

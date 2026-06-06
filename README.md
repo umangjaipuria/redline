@@ -98,6 +98,7 @@ The page listens for server events, so updates made by an agent — through the 
 ## How agents talk to Redline
 
 Agents work through the `redline-review` skill, which wraps the commands below. They also work directly.
+Agents should pass their own name with `--author` or in JSON payloads, for example `Codex` or `Claude`; blank or omitted agent authors fall back to `AI`.
 
 Read comments without loading the full HTML:
 
@@ -114,19 +115,19 @@ bun src/agent.ts file documents/howto.html
 Leave a new top-level comment thread anchored to existing text:
 
 ```bash
-bun src/agent.ts comment documents/howto.html "exact quoted text" "This needs a source." --author AI
+bun src/agent.ts comment documents/howto.html "exact quoted text" "This needs a source." --author Codex
 ```
 
 If the quoted text appears more than once, choose the 1-based occurrence in document order:
 
 ```bash
-bun src/agent.ts comment documents/howto.html "exact quoted text" "This second mention needs a source." --occurrence 2 --author AI
+bun src/agent.ts comment documents/howto.html "exact quoted text" "This second mention needs a source." --occurrence 2 --author Codex
 ```
 
 Reply to a comment thread:
 
 ```bash
-bun src/agent.ts reply documents/howto.html thread_abc123 "I updated this section." --author AI
+bun src/agent.ts reply documents/howto.html thread_abc123 "I updated this section." --author Codex
 ```
 
 Delete one reply without deleting the whole thread:
@@ -162,7 +163,7 @@ Payload shape:
     {
       "threadId": "thread_abc123",
       "body": "I made the requested change.",
-      "author": "AI"
+      "author": "Codex"
     }
   ],
   "resolveThreadIds": ["thread_done456"]

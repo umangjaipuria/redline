@@ -63,13 +63,13 @@ GET /api/agent/file
 To leave a new top-level comment thread anchored to existing text:
 
 ```bash
-bun src/agent.ts comment documents/draft.html "reviewed text" "This claim needs a source." --author AI
+bun src/agent.ts comment documents/draft.html "reviewed text" "This claim needs a source." --author Codex
 ```
 
-This creates the first message in a new thread; it is not a reply to an existing user comment. If the quoted text appears more than once in the rendered document text, the helper rejects the command until you choose the 1-based occurrence:
+Use your actual agent name for `--author` (for example `Codex` or `Claude`). If the agent name is omitted or blank in an agent-facing path, Redline falls back to `AI`. This creates the first message in a new thread; it is not a reply to an existing user comment. If the quoted text appears more than once in the rendered document text, the helper rejects the command until you choose the 1-based occurrence:
 
 ```bash
-bun src/agent.ts comment documents/draft.html "reviewed text" "This second mention needs a source." --occurrence 2 --author AI
+bun src/agent.ts comment documents/draft.html "reviewed text" "This second mention needs a source." --occurrence 2 --author Codex
 ```
 
 The helper records `textPosition`, `prefix`, and `suffix` for the selected occurrence so the browser can highlight the intended text.
@@ -77,7 +77,7 @@ The helper records `textPosition`, `prefix`, and `suffix` for the selected occur
 To reply without changing the document:
 
 ```bash
-bun src/agent.ts reply documents/draft.html <thread-id> "Reply text" --author AI
+bun src/agent.ts reply documents/draft.html <thread-id> "Reply text" --author Codex
 ```
 
 To delete one reply without deleting the whole thread, use the reply message id:
@@ -108,7 +108,7 @@ Example payload:
   "comments": [
     {
       "body": "This claim needs a source.",
-      "author": "AI",
+      "author": "Codex",
       "quote": "reviewed text",
       "anchor": {
         "type": "text-range",
@@ -121,7 +121,7 @@ Example payload:
     {
       "threadId": "thread_abc123",
       "body": "I revised this paragraph.",
-      "author": "AI"
+      "author": "Codex"
     }
   ],
   "resolveThreadIds": []

@@ -279,7 +279,7 @@ export function appendReply(
   const now = new Date().toISOString();
   thread.messages.push({
     id: newId("message"),
-    author: normalizeAuthor(author),
+    author: normalizeAuthor(author, "AI"),
     body: normalizeBody(body, "Reply body is required."),
     createdAt: now,
   });
@@ -380,7 +380,7 @@ export function applyAgentUpdate(
 
     thread.messages.push({
       id: newId("message"),
-      author: normalizeAuthor(reply.author ?? "AI"),
+      author: normalizeAuthor(reply.author, "AI"),
       body: normalizeBody(reply.body, "Reply body is required."),
       createdAt: now,
     });
@@ -391,7 +391,7 @@ export function applyAgentUpdate(
   for (const comment of input.comments ?? []) {
     const body = normalizeBody(comment.body, "Comment body is required.");
     const id = newId("thread");
-    const author = normalizeAuthor(comment.author ?? "AI");
+    const author = normalizeAuthor(comment.author, "AI");
     reviewState.threads.push({
       id,
       anchor: normalizeAnchor(comment.anchor),
@@ -650,9 +650,9 @@ function normalizeQuote(value: string): string {
   return String(value ?? "").replace(/\s+/g, " ").trim().slice(0, 500);
 }
 
-function normalizeAuthor(value?: string): string {
+function normalizeAuthor(value?: string, fallback = "User"): string {
   const author = typeof value === "string" ? value.trim() : "";
-  return author || "User";
+  return author || fallback;
 }
 
 function normalizeId(value: unknown, prefix: string): string | null {

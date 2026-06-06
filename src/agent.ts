@@ -140,12 +140,12 @@ function takeAuthor(parts: string[], fallback: string): { author: string; rest: 
   }
 
   const author = parts[authorIndex + 1];
-  if (!author) {
+  if (author === undefined) {
     throw new Error("--author requires a value.");
   }
 
   return {
-    author,
+    author: author.trim() || fallback,
     rest: [...parts.slice(0, authorIndex), ...parts.slice(authorIndex + 2)],
   };
 }
@@ -282,8 +282,8 @@ function printHelp(): void {
   bun src/agent.ts comments <document.html>
   bun src/agent.ts file <document.html>
   bun src/agent.ts state <document.html>
-  bun src/agent.ts comment <document.html> "<quoted text>" <message> [--occurrence N] [--author AI] [--thread-id thread_xyz]
-  bun src/agent.ts reply <document.html> <thread-id> <message> [--author AI]
+  bun src/agent.ts comment <document.html> "<quoted text>" <message> [--occurrence N] [--author <agent-name>] [--thread-id thread_xyz]
+  bun src/agent.ts reply <document.html> <thread-id> <message> [--author <agent-name>]
   bun src/agent.ts delete-reply <document.html> <thread-id> <message-id>
   bun src/agent.ts edit-comment <document.html> <thread-id> <message-id> <message>
   bun src/agent.ts resolve <document.html> <thread-id>
@@ -293,8 +293,8 @@ function printHelp(): void {
 The apply payload may include:
   {
     "html": "<!doctype html>...",
-    "comments": [{ "body": "...", "author": "AI", "anchor": { "type": "text-range", "quote": "..." } }],
-    "replies": [{ "threadId": "...", "body": "...", "author": "AI" }],
+    "comments": [{ "body": "...", "author": "Codex", "anchor": { "type": "text-range", "quote": "..." } }],
+    "replies": [{ "threadId": "...", "body": "...", "author": "Codex" }],
     "resolveThreadIds": ["..."]
   }`);
 }

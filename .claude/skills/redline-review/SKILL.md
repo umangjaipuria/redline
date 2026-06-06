@@ -123,7 +123,7 @@ Thread ids and `anchorId` values must match `^thread_[A-Za-z0-9_-]{1,128}$` — 
 Reply after making a relevant change:
 
 ```bash
-bun src/agent.ts reply <document.html> <thread-id> "I revised this section." --author AI
+bun src/agent.ts reply <document.html> <thread-id> "I revised this section." --author Claude
 ```
 
 Delete one reply, and only that reply, by message id:
@@ -153,7 +153,7 @@ DELETE /api/comments/<thread-id>
 POST /api/agent/update                               # server twin of `apply` (body: AgentUpdateInput)
 ```
 
-Note: the reply endpoint defaults the author to `User`, not `AI`, so pass `"author": "AI"` explicitly in the JSON body when an agent replies. The CLI `reply`/`comment` commands already default to `AI`.
+Use your actual agent name for `--author` or JSON `author` fields, for example `Claude`. Agent helper and update paths fall back to `AI` when the agent name is blank or omitted. Note: the generic reply endpoint defaults an omitted author to `User`, so pass `"author": "Claude"` explicitly in the JSON body when replying through that endpoint.
 
 Use the `<pid>.json` files in `~/.local/state/redline/servers/` to find a running server's URL and document path (see [When To Use](#when-to-use) for how to pick among them). The directory is fixed and per-user, so it resolves the same way no matter which directory the agent runs in.
 
@@ -177,7 +177,7 @@ Payloads may include:
   "comments": [
     {
       "body": "This claim needs a source.",
-      "author": "AI",
+      "author": "Claude",
       "quote": "growth improved by 40%",
       "anchor": {
         "type": "text-range",
@@ -186,17 +186,17 @@ Payloads may include:
       }
     }
   ],
-  "replies": [{ "threadId": "thread_abc123", "body": "Updated.", "author": "AI" }],
+  "replies": [{ "threadId": "thread_abc123", "body": "Updated.", "author": "Claude" }],
   "resolveThreadIds": ["thread_done456"]
 }
 ```
 
 ## Add A Comment
 
-Prefer the helper command. It creates a new top-level anchored comment thread, defaults the author to `AI`, and enforces the id rules:
+Prefer the helper command. It creates a new top-level anchored comment thread, accepts your agent name with `--author`, falls back to `AI` when the name is blank or omitted, and enforces the id rules:
 
 ```bash
-bun src/agent.ts comment <document.html> "<exact quoted text>" "Your comment." [--occurrence N] --author AI
+bun src/agent.ts comment <document.html> "<exact quoted text>" "Your comment." [--occurrence N] --author Claude
 ```
 
 The quote must be one shell argument (wrap it in quotes); everything after it is the comment body. This command creates the first message in a new thread; use `reply` only when responding inside an existing thread. Pass `--thread-id thread_xyz` to choose the id (it must start with `thread_`); otherwise one is generated. The quote should match the rendered document text exactly so the browser can highlight it.
@@ -204,7 +204,7 @@ The quote must be one shell argument (wrap it in quotes); everything after it is
 If the same quote appears multiple times, the helper rejects the command unless you pass `--occurrence N`, where `N` is the 1-based occurrence in document order:
 
 ```bash
-bun src/agent.ts comment <document.html> "growth improved by 40%" "This second claim needs a source." --occurrence 2 --author AI
+bun src/agent.ts comment <document.html> "growth improved by 40%" "This second claim needs a source." --occurrence 2 --author Claude
 ```
 
 The helper records the selected occurrence's `textPosition`, `prefix`, and `suffix`. That gives the browser a specific target instead of relying on a first quote match.
@@ -230,13 +230,13 @@ Embedded state:
     "quote": "growth improved by 40%"
   },
   "quote": "growth improved by 40%",
-  "author": "AI",
+  "author": "Claude",
   "createdAt": "2026-06-02T12:00:00.000Z",
   "updatedAt": "2026-06-02T12:00:00.000Z",
   "messages": [
     {
       "id": "message_source_needed",
-      "author": "AI",
+      "author": "Claude",
       "body": "This claim needs a source.",
       "createdAt": "2026-06-02T12:00:00.000Z"
     }

@@ -109,8 +109,9 @@ test("creates, replies to, and resolves comment threads", () => {
   expect(withComment.threads).toHaveLength(1);
   const threadId = withComment.threads[0]?.id ?? "";
 
-  const withReply = appendReply(documentPath, threadId, "Updated the paragraph.", "AI");
+  const withReply = appendReply(documentPath, threadId, "Updated the paragraph.", "  ");
   expect(withReply.threads[0]?.messages).toHaveLength(2);
+  expect(withReply.threads[0]?.messages.at(-1)?.author).toBe("AI");
   expect(fs.readFileSync(documentPath, "utf8")).toContain('id="redline-state"');
 
   const resolved = resolveThread(documentPath, threadId);
@@ -281,6 +282,31 @@ test("agent updates can replace html and append replies together", () => {
   expect(updated.html).toContain("Hello, friend.");
   expect(updated.html).toContain('id="redline-state"');
   expect(updated.threads[0]?.messages.at(-1)?.author).toBe("AI");
+});
+
+test("agent updates use supplied author names and fall back to AI for blanks", () => {
+  const documentPath = tempDocument();
+  const withComment = createComment(documentPath, {
+    body: "Make the greeting warmer.",
+    anchor: { type: "document" },
+  });
+  const threadId = withComment.threads[0]?.id ?? "";
+
+  const updated = applyAgentUpdate(documentPath, {
+    comments: [
+      {
+        body: "Fresh agent note.",
+        author: "Codex",
+        quote: "Document-level follow-up.",
+        anchor: { type: "document" },
+      },
+    ],
+    replies: [{ threadId, body: "Blank author reply.", author: "  " }],
+  });
+
+  expect(updated.threads[0]?.messages.at(-1)?.author).toBe("AI");
+  expect(updated.threads[1]?.author).toBe("Codex");
+  expect(updated.threads[1]?.messages[0]?.author).toBe("Codex");
 });
 
 test("agent updates can add comments and resolve inline anchors", () => {
