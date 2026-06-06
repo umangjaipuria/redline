@@ -120,6 +120,26 @@ test("creates, replies to, and resolves comment threads", () => {
   expect(fs.existsSync(sidecarPathFor(documentPath))).toBe(false);
 });
 
+test("text-range comments insert durable inline anchors", () => {
+  const documentPath = tempDocument();
+  const withComment = createComment(documentPath, {
+    body: "Tighten this sentence.",
+    author: "User",
+    quote: "Hello world.",
+    anchor: {
+      type: "text-range",
+      quote: "Hello world.",
+      textPosition: { start: 0, end: 12 },
+    },
+  });
+  const threadId = withComment.threads[0]?.id ?? "";
+
+  expect(withComment.threads[0]?.anchor.anchorId).toBe(threadId);
+  expect(fs.readFileSync(documentPath, "utf8")).toContain(
+    `<span data-redline-anchor="${threadId}">Hello world.</span>`,
+  );
+});
+
 test("reads compact agent states without returning html", () => {
   const documentPath = tempDocument();
   const withComment = createComment(documentPath, {
@@ -307,6 +327,29 @@ test("agent updates use supplied author names and fall back to AI for blanks", (
   expect(updated.threads[0]?.messages.at(-1)?.author).toBe("AI");
   expect(updated.threads[1]?.author).toBe("Codex");
   expect(updated.threads[1]?.messages[0]?.author).toBe("Codex");
+});
+
+test("agent updates insert durable inline anchors for new text comments", () => {
+  const documentPath = tempDocument();
+
+  const updated = applyAgentUpdate(documentPath, {
+    comments: [
+      {
+        body: "Anchor this note.",
+        author: "Codex",
+        quote: "Hello world.",
+        anchor: {
+          type: "text-range",
+          quote: "Hello world.",
+          textPosition: { start: 0, end: 12 },
+        },
+      },
+    ],
+  });
+  const threadId = updated.threads[0]?.id ?? "";
+
+  expect(updated.threads[0]?.anchor.anchorId).toBe(threadId);
+  expect(updated.html).toContain(`<span data-redline-anchor="${threadId}">Hello world.</span>`);
 });
 
 test("agent updates can add comments and resolve inline anchors", () => {

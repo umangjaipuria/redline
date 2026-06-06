@@ -89,7 +89,7 @@ A thread highlights in two ways, and you can rely on either:
 - **Persisted span.** If the HTML contains `<span data-redline-anchor="thread_id">…</span>`, the highlight is durable: it survives edits that move surrounding text, because the location is stored in the file.
 - **Quote match.** If there is no span, the browser re-anchors at render time by matching `anchor.textPosition` first, then `anchor.prefix`/`anchor.suffix` context, and then `anchor.quote` against the document text. The highlight appears in the browser but is *not* written back to the file.
 
-So a comment created with a unique quote, or with a quote plus `textPosition`, will still show up highlighted; you do not have to hand-wrap a span for the comment to be visible. Hand-wrap a span only when you want the anchor to stay put across later text edits. The comment helpers (`comment`, `apply`, `POST /api/comments`) do **not** insert the span for you; they only record the thread.
+So a comment created with a unique quote, or with a quote plus `textPosition`, will still show up highlighted. The comment helpers (`comment`, `apply`, `POST /api/comments`) also insert a durable `data-redline-anchor` span when they can map the quote back to the source HTML. Hand-wrap a span only when a helper cannot map the target and you need the anchor to stay put across later text edits.
 
 ### Hidden anchor edge cases
 
@@ -207,7 +207,7 @@ If the same quote appears multiple times, the helper rejects the command unless 
 bun src/agent.ts comment <document.html> "growth improved by 40%" "This second claim needs a source." --occurrence 2 --author Claude
 ```
 
-The helper records the selected occurrence's `textPosition`, `prefix`, and `suffix`. That gives the browser a specific target instead of relying on a first quote match.
+The helper records the selected occurrence's `textPosition`, `prefix`, and `suffix`, and inserts a matching `data-redline-anchor` span into the source HTML when the range can be mapped.
 
 On a running server, the equivalent is `POST /api/comments` with a `CreateCommentInput` body, or `bun src/agent.ts apply` / `POST /api/agent/update` with a `comments` entry when batching with replies or an HTML revision.
 

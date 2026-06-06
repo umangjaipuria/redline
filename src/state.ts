@@ -7,6 +7,11 @@ export interface TextPosition {
   end: number;
 }
 
+interface HtmlTextRange {
+  start: number;
+  end: number;
+}
+
 export interface CommentAnchor {
   type: "text-range" | "document";
   anchorId?: string;
@@ -244,10 +249,7 @@ export function createComment(
   };
 
   const quote = normalizeQuote(input.quote ?? input.anchor.quote ?? "");
-  const anchor = normalizeAnchor({
-    ...input.anchor,
-    anchorId: input.anchor.anchorId ?? (hasInlineAnchor(html, id) ? id : undefined),
-  });
+  const { anchor, html: htmlWithAnchor } = prepareCommentAnchor(html, input.anchor, quote, id);
   reviewState.threads.push({
     id,
     anchor,
@@ -258,7 +260,7 @@ export function createComment(
     messages: [message],
   });
   reviewState.updatedAt = now;
-  writeHtmlWithReviewState(absoluteDocumentPath, html, reviewState);
+  writeHtmlWithReviewState(absoluteDocumentPath, htmlWithAnchor, reviewState);
   return readDocumentState(absoluteDocumentPath);
 }
 
@@ -368,7 +370,7 @@ export function applyAgentUpdate(
   const absoluteDocumentPath = path.resolve(documentPath);
   const currentHtml = readDocumentHtml(absoluteDocumentPath);
   const reviewState = readReviewState(absoluteDocumentPath, currentHtml);
-  const nextHtml = typeof input.html === "string" ? input.html : currentHtml;
+  let nextHtml = typeof input.html === "string" ? input.html : currentHtml;
   const now = new Date().toISOString();
   let changed = false;
 
@@ -392,10 +394,13 @@ export function applyAgentUpdate(
     const body = normalizeBody(comment.body, "Comment body is required.");
     const id = newId("thread");
     const author = normalizeAuthor(comment.author, "AI");
+    const quote = normalizeQuote(comment.quote ?? comment.anchor.quote ?? "");
+    const prepared = prepareCommentAnchor(nextHtml, comment.anchor, quote, id);
+    nextHtml = prepared.html;
     reviewState.threads.push({
       id,
-      anchor: normalizeAnchor(comment.anchor),
-      quote: normalizeQuote(comment.quote ?? comment.anchor.quote ?? ""),
+      anchor: prepared.anchor,
+      quote,
       author,
       createdAt: now,
       updatedAt: now,
@@ -563,6 +568,34 @@ function anchorIdsFor(threads: CommentThread[]): string[] {
     .filter((id): id is string => id.length > 0);
 }
 
+function prepareCommentAnchor(
+  html: string,
+  inputAnchor: CommentAnchor,
+  quote: string,
+  threadId: string,
+): { anchor: CommentAnchor; html: string } {
+  const initialAnchor = normalizeAnchor(inputAnchor);
+  if (initialAnchor.type !== "text-range") {
+    return { anchor: initialAnchor, html };
+  }
+
+  const anchorId = initialAnchor.anchorId ?? threadId;
+  const anchor: CommentAnchor = { ...initialAnchor, anchorId };
+  if (hasInlineAnchor(html, anchorId)) {
+    return { anchor, html };
+  }
+
+  const range = findTextRangeForAnchor(html, anchor, quote);
+  if (!range) {
+    return { anchor, html };
+  }
+
+  return {
+    anchor,
+    html: insertInlineAnchor(html, anchorId, range) ?? html,
+  };
+}
+
 function hasInlineAnchor(html: string, anchorId: string): boolean {
   return inlineAnchorPattern(anchorId).some((pattern) => pattern.test(html));
 }
@@ -585,6 +618,264 @@ function inlineAnchorPattern(anchorId: string): RegExp[] {
         "gi",
       ),
   );
+}
+
+function findTextRangeForAnchor(
+  html: string,
+  anchor: CommentAnchor,
+  quote: string,
+): HtmlTextRange | null {
+  if (anchor.type !== "text-range") return null;
+
+  const text = textContentForAnchoring(html);
+  const normalizedQuote = normalizeQuote(quote || anchor.quote || "");
+  if (anchor.textPosition) {
+    const { start, end } = anchor.textPosition;
+    if (
+      start >= 0 &&
+      end > start &&
+      end <= text.length &&
+      normalizeQuote(text.slice(start, end)) === normalizedQuote
+    ) {
+      return { start, end };
+    }
+  }
+
+  if (!normalizedQuote) return null;
+
+  const contextual = findContextualTextRange(text, normalizedQuote, anchor.prefix, anchor.suffix);
+  if (contextual) return contextual;
+
+  const exact = text.indexOf(normalizedQuote);
+  if (exact !== -1) {
+    return { start: exact, end: exact + normalizedQuote.length };
+  }
+
+  return findNormalizedTextRange(text, normalizedQuote);
+}
+
+function findContextualTextRange(
+  text: string,
+  quote: string,
+  prefix = "",
+  suffix = "",
+): HtmlTextRange | null {
+  if (!prefix && !suffix) return null;
+
+  const matches: HtmlTextRange[] = [];
+  let startAt = 0;
+  while (startAt <= text.length) {
+    const start = text.indexOf(quote, startAt);
+    if (start === -1) break;
+    const end = start + quote.length;
+    const prefixMatches = !prefix || text.slice(0, start).endsWith(prefix);
+    const suffixMatches = !suffix || text.slice(end).startsWith(suffix);
+    if (prefixMatches && suffixMatches) {
+      matches.push({ start, end });
+    }
+    startAt = end;
+  }
+
+  return matches.length === 1 ? matches[0] ?? null : null;
+}
+
+function findNormalizedTextRange(text: string, quote: string): HtmlTextRange | null {
+  const normalizedText = text.replace(/\s+/g, " ");
+  const normalizedQuote = quote.replace(/\s+/g, " ");
+  const normalizedStart = normalizedText.indexOf(normalizedQuote);
+  if (normalizedStart === -1) return null;
+
+  return mapNormalizedTextRange(text, normalizedStart, normalizedStart + normalizedQuote.length);
+}
+
+function mapNormalizedTextRange(
+  text: string,
+  normalizedStart: number,
+  normalizedEnd: number,
+): HtmlTextRange | null {
+  let normalizedIndex = 0;
+  let start: number | null = null;
+  let end: number | null = null;
+  let inWhitespace = false;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const isWhitespace = /\s/.test(text[index] ?? "");
+    if (isWhitespace && inWhitespace) continue;
+
+    if (normalizedIndex === normalizedStart && start === null) start = index;
+    if (normalizedIndex === normalizedEnd && end === null) {
+      end = index;
+      break;
+    }
+
+    normalizedIndex += 1;
+    inWhitespace = isWhitespace;
+  }
+
+  if (start === null) return null;
+  return { start, end: end ?? text.length };
+}
+
+function insertInlineAnchor(html: string, anchorId: string, range: HtmlTextRange): string | null {
+  const indices = htmlIndicesForTextRange(html, range);
+  if (!indices || indices.start >= indices.end) return null;
+
+  const open = `<span data-redline-anchor="${anchorId}">`;
+  return `${html.slice(0, indices.start)}${open}${html.slice(indices.start, indices.end)}</span>${html.slice(
+    indices.end,
+  )}`;
+}
+
+function htmlIndicesForTextRange(html: string, range: HtmlTextRange): HtmlTextRange | null {
+  const bounds = bodyContentBounds(html);
+  let textOffset = 0;
+  let htmlStart: number | null = null;
+  let htmlEnd: number | null = null;
+  let index = bounds.start;
+
+  while (index < bounds.end) {
+    const skipped = skippableHtmlEnd(html, index, bounds.end);
+    if (skipped !== null) {
+      index = skipped;
+      continue;
+    }
+
+    const token = readTextToken(html, index, bounds.end);
+    const nextTextOffset = textOffset + token.text.length;
+    if (htmlStart === null && range.start >= textOffset && range.start < nextTextOffset) {
+      htmlStart = htmlIndexWithinTextToken(token, range.start - textOffset);
+    }
+    if (htmlEnd === null && range.end > textOffset && range.end <= nextTextOffset) {
+      htmlEnd = htmlIndexWithinTextToken(token, range.end - textOffset);
+      break;
+    }
+
+    textOffset = nextTextOffset;
+    index = token.end;
+  }
+
+  if (htmlStart === null || htmlEnd === null) return null;
+  return { start: htmlStart, end: htmlEnd };
+}
+
+function textContentForAnchoring(html: string): string {
+  const bounds = bodyContentBounds(html);
+  let text = "";
+  let index = bounds.start;
+
+  while (index < bounds.end) {
+    const skipped = skippableHtmlEnd(html, index, bounds.end);
+    if (skipped !== null) {
+      index = skipped;
+      continue;
+    }
+
+    const token = readTextToken(html, index, bounds.end);
+    text += token.text;
+    index = token.end;
+  }
+
+  return text;
+}
+
+function bodyContentBounds(html: string): HtmlTextRange {
+  const bodyMatch = /<body\b/i.exec(html);
+  if (!bodyMatch) {
+    return { start: 0, end: html.length };
+  }
+
+  const openEnd = tagEndIndex(html, bodyMatch.index, html.length);
+  const closeMatch = /<\/body\s*>/i.exec(html.slice(openEnd));
+  return {
+    start: openEnd,
+    end: closeMatch ? openEnd + closeMatch.index : html.length,
+  };
+}
+
+function skippableHtmlEnd(html: string, index: number, limit: number): number | null {
+  if (html.startsWith("<!--", index)) {
+    const end = html.indexOf("-->", index + 4);
+    return end === -1 ? limit : Math.min(limit, end + 3);
+  }
+
+  if (html[index] !== "<") return null;
+
+  const tagEnd = tagEndIndex(html, index, limit);
+  const tagText = html.slice(index, tagEnd);
+  const tagName = tagText.match(/^<\/?\s*([A-Za-z][\w:-]*)/)?.[1]?.toLowerCase();
+  if (tagName === "script" || tagName === "style") {
+    const closePattern = new RegExp(`<\\/${tagName}\\s*>`, "i");
+    const closeMatch = closePattern.exec(html.slice(tagEnd, limit));
+    return closeMatch ? Math.min(limit, tagEnd + closeMatch.index + closeMatch[0].length) : limit;
+  }
+
+  return tagEnd;
+}
+
+function tagEndIndex(html: string, start: number, limit: number): number {
+  let quote: string | null = null;
+  for (let index = start + 1; index < limit; index += 1) {
+    const char = html[index];
+    if (quote) {
+      if (char === quote) quote = null;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (char === ">") {
+      return index + 1;
+    }
+  }
+  return limit;
+}
+
+function readTextToken(html: string, index: number, limit: number): { start: number; end: number; text: string } {
+  if (html[index] === "&") {
+    const entityEnd = html.indexOf(";", index + 1);
+    if (entityEnd !== -1 && entityEnd < limit) {
+      const raw = html.slice(index, entityEnd + 1);
+      return { start: index, end: entityEnd + 1, text: decodeHtmlEntity(raw) };
+    }
+  }
+
+  return { start: index, end: index + 1, text: html[index] ?? "" };
+}
+
+function htmlIndexWithinTextToken(
+  token: { start: number; end: number; text: string },
+  textOffset: number,
+): number {
+  if (textOffset <= 0) return token.start;
+  if (textOffset >= token.text.length) return token.end;
+  return token.end;
+}
+
+function decodeHtmlEntity(entity: string): string {
+  const body = entity.slice(1, -1);
+  if (body.startsWith("#x") || body.startsWith("#X")) {
+    const codePoint = Number.parseInt(body.slice(2), 16);
+    return isValidCodePoint(codePoint) ? String.fromCodePoint(codePoint) : entity;
+  }
+  if (body.startsWith("#")) {
+    const codePoint = Number.parseInt(body.slice(1), 10);
+    return isValidCodePoint(codePoint) ? String.fromCodePoint(codePoint) : entity;
+  }
+
+  const named: Record<string, string> = {
+    amp: "&",
+    apos: "'",
+    gt: ">",
+    lt: "<",
+    nbsp: "\u00a0",
+    quot: '"',
+  };
+  return named[body.toLowerCase()] ?? entity;
+}
+
+function isValidCodePoint(value: number): boolean {
+  return Number.isInteger(value) && value >= 0 && value <= 0x10ffff;
 }
 
 function jsonForHtmlScript(value: EmbeddedCommentState): string {
