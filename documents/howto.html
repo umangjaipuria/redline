@@ -348,6 +348,12 @@ bun src/agent.ts reply documents/howto.html thread_abc123 "I revised this sectio
 bun src/agent.ts delete-reply documents/howto.html thread_abc123 message_reply456
 bun src/agent.ts resolve documents/howto.html thread_abc123
 bun src/agent.ts apply documents/howto.html /tmp/redline-update.json</code></pre>
+        <p>
+          With the server running, use the HTTP index to scan recent activity without full message bodies, then fetch one
+          thread when you need the full conversation.
+        </p>
+        <pre><code>curl 'http://127.0.0.1:7331/api/agent/comments/index?since=2026-01-01T00:00:00.000Z'
+curl http://127.0.0.1:7331/api/agent/comments/thread_abc123</code></pre>
         <div class="badge-row" aria-label="Agent principles">
           <span class="badge">Read before editing</span>
           <span class="badge">Create top-level threads</span>

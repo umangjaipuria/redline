@@ -8,6 +8,7 @@ import {
   type CreateCommentInput,
   type DocumentState,
 } from "./state";
+import { clientErrorFor } from "./http-errors";
 
 export interface CommentRouteOptions {
   documentPath: string;
@@ -15,6 +16,21 @@ export interface CommentRouteOptions {
 }
 
 export async function handleCommentRequest(
+  request: Request,
+  options: CommentRouteOptions,
+): Promise<Response | undefined> {
+  try {
+    return await handleCommentRequestUnsafe(request, options);
+  } catch (error) {
+    const clientError = clientErrorFor(error);
+    if (clientError) {
+      return json({ error: clientError.message }, clientError.status);
+    }
+    throw error;
+  }
+}
+
+async function handleCommentRequestUnsafe(
   request: Request,
   options: CommentRouteOptions,
 ): Promise<Response | undefined> {

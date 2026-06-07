@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { handleAgentRequest } from "./agent-routes";
 import { handleCommentRequest } from "./comment-routes";
+import { clientErrorFor } from "./http-errors";
 import {
   removeServerState as removeServerStateFile,
   serverStatePath as serverStateFilePath,
@@ -77,6 +78,10 @@ export function createRequestHandler(options: ServerOptions): (request: Request)
     try {
       return await handleRequest(request, runtime);
     } catch (error) {
+      const clientError = clientErrorFor(error);
+      if (clientError) {
+        return json({ error: clientError.message }, clientError.status);
+      }
       const message = error instanceof Error ? error.message : "Unknown server error.";
       return json({ error: message }, 500);
     }
@@ -99,6 +104,10 @@ function startServer(options: ServerOptions): void {
       try {
         return await handleRequest(request, runtime);
       } catch (error) {
+        const clientError = clientErrorFor(error);
+        if (clientError) {
+          return json({ error: clientError.message }, clientError.status);
+        }
         const message = error instanceof Error ? error.message : "Unknown server error.";
         return json({ error: message }, 500);
       }
@@ -260,15 +269,29 @@ function handleWithoutDocument(
   if (
     pathname === "/api/state" ||
     pathname === "/api/agent/state" ||
-    pathname === "/api/agent/comments" ||
     pathname === "/api/agent/file"
   ) {
     return json(emptyDocumentState(runtime.howtoPath));
   }
 
+  if (pathname === "/api/agent/comments/index") {
+    const emptyState = emptyDocumentState(runtime.howtoPath);
+    return json({
+      documentPath: emptyState.documentPath,
+      legacySidecarPath: emptyState.legacySidecarPath,
+      version: emptyState.version,
+      updatedAt: emptyState.updatedAt,
+      threads: [],
+      summary: emptyState.summary,
+      noDocument: emptyState.noDocument,
+      ...(emptyState.howtoPath ? { howtoPath: emptyState.howtoPath } : {}),
+    });
+  }
+
   if (
     (pathname === "/api/document" && request.method === "PUT") ||
     pathname.startsWith("/api/comments") ||
+    pathname.startsWith("/api/agent/comments/") ||
     pathname === "/api/agent/update"
   ) {
     return json({ error: "No document is open. Open an HTML file in Redline first." }, 409);

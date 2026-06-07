@@ -75,6 +75,40 @@ export interface CommentState {
   summary: ReviewSummary;
 }
 
+export interface AgentCommentIndexMessage {
+  author: string;
+  createdAt: string;
+}
+
+export interface AgentCommentIndexThread {
+  id: string;
+  anchor: CommentAnchor;
+  quote: string;
+  author: string;
+  createdAt: string;
+  updatedAt: string;
+  comments: AgentCommentIndexMessage[];
+  lastCommentBody: string;
+}
+
+export interface AgentCommentIndexState {
+  documentPath: string;
+  legacySidecarPath: string;
+  version: string;
+  updatedAt: string;
+  threads: AgentCommentIndexThread[];
+  summary: ReviewSummary;
+}
+
+export interface AgentCommentThreadState {
+  documentPath: string;
+  legacySidecarPath: string;
+  version: string;
+  updatedAt: string;
+  thread: CommentThread;
+  summary: ReviewSummary;
+}
+
 export interface DocumentFileState {
   documentPath: string;
   legacySidecarPath: string;
@@ -201,6 +235,58 @@ export function readCommentState(documentPath: string): CommentState {
     updatedAt: state.updatedAt,
     threads: state.threads,
     summary: state.summary,
+  };
+}
+
+export function readAgentCommentIndexState(
+  documentPath: string,
+  options: { since?: string } = {},
+): AgentCommentIndexState {
+  const state = readDocumentState(documentPath);
+  const sinceTime = options.since === undefined ? undefined : Date.parse(options.since);
+  const threads = state.threads
+    .filter((thread) => threadMatchesSince(thread, sinceTime))
+    .map((thread) => ({
+      id: thread.id,
+      anchor: thread.anchor,
+      quote: thread.quote,
+      author: thread.author,
+      createdAt: thread.createdAt,
+      updatedAt: thread.updatedAt,
+      comments: thread.messages.map((message) => ({
+        author: message.author,
+        createdAt: message.createdAt,
+      })),
+      lastCommentBody: thread.messages.at(-1)?.body ?? "",
+    }));
+
+  return {
+    documentPath: state.documentPath,
+    legacySidecarPath: state.legacySidecarPath,
+    version: state.version,
+    updatedAt: state.updatedAt,
+    threads,
+    summary: summarizeForIndex(threads),
+  };
+}
+
+export function readAgentCommentThreadState(
+  documentPath: string,
+  threadId: string,
+): AgentCommentThreadState {
+  const state = readDocumentState(documentPath);
+  const thread = state.threads.find((item) => item.id === threadId);
+  if (!thread) {
+    throw new Error(`Comment thread not found: ${threadId}`);
+  }
+
+  return {
+    documentPath: state.documentPath,
+    legacySidecarPath: state.legacySidecarPath,
+    version: state.version,
+    updatedAt: state.updatedAt,
+    thread,
+    summary: summarize([thread]),
   };
 }
 
@@ -489,6 +575,22 @@ export function summarize(threads: CommentThread[]): ReviewSummary {
     messages: threads.reduce((total, thread) => total + thread.messages.length, 0),
     unresolved: threads.length,
   };
+}
+
+function summarizeForIndex(threads: AgentCommentIndexThread[]): ReviewSummary {
+  return {
+    threads: threads.length,
+    messages: threads.reduce((total, thread) => total + thread.comments.length, 0),
+    unresolved: threads.length,
+  };
+}
+
+function threadMatchesSince(thread: CommentThread, sinceTime: number | undefined): boolean {
+  if (sinceTime === undefined) return true;
+  return thread.messages.some((message) => {
+    const messageTime = Date.parse(message.createdAt);
+    return Number.isFinite(messageTime) && messageTime >= sinceTime;
+  });
 }
 
 function emptyReviewState(): EmbeddedCommentState {

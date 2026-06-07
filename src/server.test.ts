@@ -50,6 +50,14 @@ function expectResponse(response: Response | undefined) {
   return response;
 }
 
+function documentWithReviewState(threads: unknown[]) {
+  return `<!doctype html><html><head><script type="application/json" id="redline-state">${JSON.stringify({
+    schemaVersion: 1,
+    updatedAt: "2026-01-02T00:00:00.000Z",
+    threads,
+  })}</script></head><body><p>Hello world.</p></body></html>`;
+}
+
 test("GET /document-assets/ does not stream the document directory", async () => {
   const documentPath = tempDocument();
   const handler = createRequestHandler({ documentPath, host: "127.0.0.1", port: 0 });
@@ -60,23 +68,127 @@ test("GET /document-assets/ does not stream the document directory", async () =>
   expect(await response.text()).toBe("Not found");
 });
 
-test("GET /api/agent/comments returns comments without html", async () => {
+test("GET /api/agent/comments is removed from the full server", async () => {
   const documentPath = tempDocument();
-  createComment(documentPath, {
-    body: "Comment-only state.",
-    anchor: { type: "document" },
-  });
+  const handler = createRequestHandler({ documentPath, host: "127.0.0.1", port: 0 });
+
+  const response = await handler(new Request("http://127.0.0.1/api/agent/comments"));
+
+  expect(response.status).toBe(404);
+  expect(await response.text()).toBe("Not found");
+});
+
+test("GET /api/agent/comments/index returns a filtered lightweight comment index", async () => {
+  const oldTimestamp = "2026-01-01T00:00:00.000Z";
+  const recentTimestamp = "2026-01-02T00:00:00.000Z";
+  const documentPath = tempDocument(
+    documentWithReviewState([
+      {
+        id: "thread_old",
+        anchor: { type: "document" },
+        quote: "",
+        author: "Reviewer",
+        createdAt: oldTimestamp,
+        updatedAt: oldTimestamp,
+        messages: [
+          {
+            id: "message_old",
+            author: "Reviewer",
+            body: "Old body.",
+            createdAt: oldTimestamp,
+          },
+        ],
+      },
+      {
+        id: "thread_recent",
+        anchor: { type: "document" },
+        quote: "",
+        author: "Reviewer",
+        createdAt: oldTimestamp,
+        updatedAt: recentTimestamp,
+        messages: [
+          {
+            id: "message_first",
+            author: "Reviewer",
+            body: "Original body.",
+            createdAt: oldTimestamp,
+          },
+          {
+            id: "message_recent",
+            author: "Codex",
+            body: "Recent reply body.",
+            createdAt: recentTimestamp,
+          },
+        ],
+      },
+    ]),
+  );
 
   const response = expectResponse(agentRouter(documentPath)(
-    new Request("http://127.0.0.1/api/agent/comments"),
+    new Request("http://127.0.0.1/api/agent/comments/index?since=2026-01-01T12:00:00.000Z"),
   ));
   const payload = await response.json();
 
   expect(response.status).toBe(200);
   expect(payload.documentPath).toBe(documentPath);
   expect(payload.threads).toHaveLength(1);
+  expect(payload.summary).toEqual({ threads: 1, messages: 2, unresolved: 1 });
+  expect(payload.threads[0]).toEqual({
+    id: "thread_recent",
+    anchor: { type: "document" },
+    quote: "",
+    author: "Reviewer",
+    createdAt: oldTimestamp,
+    updatedAt: recentTimestamp,
+    comments: [
+      { author: "Reviewer", createdAt: oldTimestamp },
+      { author: "Codex", createdAt: recentTimestamp },
+    ],
+    lastCommentBody: "Recent reply body.",
+  });
+  expect("html" in payload).toBe(false);
+  expect("messages" in payload.threads[0]).toBe(false);
+});
+
+test("GET /api/agent/comments/index rejects invalid since filters", async () => {
+  const documentPath = tempDocument();
+
+  const response = expectResponse(agentRouter(documentPath)(
+    new Request("http://127.0.0.1/api/agent/comments/index?since=yesterday"),
+  ));
+  const payload = await response.json();
+
+  expect(response.status).toBe(400);
+  expect(payload.error).toBe("since must be an ISO timestamp.");
+});
+
+test("GET /api/agent/comments/:id returns one full thread", async () => {
+  const documentPath = tempDocument();
+  const state = createComment(documentPath, {
+    body: "Thread body.",
+    author: "Reviewer",
+    anchor: { type: "document" },
+  });
+  const threadId = state.threads[0]?.id ?? "";
+
+  const response = expectResponse(agentRouter(documentPath)(
+    new Request(`http://127.0.0.1/api/agent/comments/${threadId}`),
+  ));
+  const payload = await response.json();
+
+  expect(response.status).toBe(200);
+  expect(payload.documentPath).toBe(documentPath);
+  expect(payload.thread).toEqual(state.threads[0]);
   expect(payload.summary).toEqual({ threads: 1, messages: 1, unresolved: 1 });
   expect("html" in payload).toBe(false);
+});
+
+test("GET /api/agent/comments without a subpath is not an agent route", () => {
+  const documentPath = tempDocument();
+
+  const response = agentRouter(documentPath)(new Request("http://127.0.0.1/api/agent/comments"));
+
+  expect(response).toBeUndefined();
 });
 
 test("GET /api/agent/file returns the current file path without html", async () => {
@@ -118,6 +230,90 @@ test("POST /api/comments creates a routed comment", async () => {
   expect(router.reasons).toEqual(["comment.created"]);
   expect(payload.threads).toHaveLength(1);
   expect(payload.threads[0]?.messages[0]?.body).toBe("Add a note.");
+});
+
+test("POST /api/comments returns 400 for missing comment bodies", async () => {
+  const documentPath = tempDocument();
+  const handler = createRequestHandler({ documentPath, host: "127.0.0.1", port: 0 });
+
+  const response = await handler(
+    new Request("http://127.0.0.1/api/comments", {
+      method: "POST",
+      body: JSON.stringify({ anchor: { type: "document" } }),
+    }),
+  );
+  const payload = await response.json();
+
+  expect(response.status).toBe(400);
+  expect(payload.error).toBe("Comment body is required.");
+});
+
+test("POST /api/comments returns 422 when quoted text is not found", async () => {
+  const documentPath = tempDocument();
+  const handler = createRequestHandler({ documentPath, host: "127.0.0.1", port: 0 });
+
+  const response = await handler(
+    new Request("http://127.0.0.1/api/comments", {
+      method: "POST",
+      body: JSON.stringify({
+        body: "Find this text.",
+        quote: "Missing target text.",
+        anchor: { type: "text-range", quote: "Missing target text." },
+      }),
+    }),
+  );
+  const payload = await response.json();
+
+  expect(response.status).toBe(422);
+  expect(payload.error).toBe("Quoted text was not found in the document body.");
+});
+
+test("POST /api/comments returns 422 when quoted text is ambiguous", async () => {
+  const documentPath = tempDocument(
+    "<!doctype html><html><body><p>Hello world.</p><p>Hello world.</p></body></html>",
+  );
+  const handler = createRequestHandler({ documentPath, host: "127.0.0.1", port: 0 });
+
+  const response = await handler(
+    new Request("http://127.0.0.1/api/comments", {
+      method: "POST",
+      body: JSON.stringify({
+        body: "Choose one.",
+        quote: "Hello world.",
+        anchor: { type: "text-range", quote: "Hello world." },
+      }),
+    }),
+  );
+  const payload = await response.json();
+
+  expect(response.status).toBe(422);
+  expect(payload.error).toBe(
+    "Quoted text appears 2 times. Pass --occurrence N (or anchor.occurrence) to choose the 1-based occurrence.",
+  );
+});
+
+test("POST /api/agent/update returns 422 for invalid batched comments", async () => {
+  const documentPath = tempDocument();
+  const handler = createRequestHandler({ documentPath, host: "127.0.0.1", port: 0 });
+
+  const response = await handler(
+    new Request("http://127.0.0.1/api/agent/update", {
+      method: "POST",
+      body: JSON.stringify({
+        comments: [
+          {
+            body: "Find this text.",
+            quote: "Missing target text.",
+            anchor: { type: "text-range", quote: "Missing target text." },
+          },
+        ],
+      }),
+    }),
+  );
+  const payload = await response.json();
+
+  expect(response.status).toBe(422);
+  expect(payload.error).toBe("Quoted text was not found in the document body.");
 });
 
 test("POST /api/comments rejects stale expected versions", async () => {
@@ -330,9 +526,11 @@ test("agent routes return undefined for unrelated requests", () => {
 });
 
 test("comment routes reject invalid JSON bodies", async () => {
-  await expect(
-    commentRouter(tempDocument()).handle(
-      new Request("http://127.0.0.1/api/comments", { method: "POST", body: "{" }),
-    ),
-  ).rejects.toThrow("Request body must be valid JSON.");
+  const response = await commentRouter(tempDocument()).handle(
+    new Request("http://127.0.0.1/api/comments", { method: "POST", body: "{" }),
+  );
+  const payload = await response?.json();
+
+  expect(response?.status).toBe(400);
+  expect(payload.error).toBe("Request body must be valid JSON.");
 });

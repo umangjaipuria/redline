@@ -173,7 +173,8 @@ Payload shape:
 When the server is running, agents can also use HTTP:
 
 ```bash
-curl http://127.0.0.1:7331/api/agent/comments
+curl 'http://127.0.0.1:7331/api/agent/comments/index?since=2026-01-01T00:00:00.000Z'
+curl http://127.0.0.1:7331/api/agent/comments/thread_abc123
 curl http://127.0.0.1:7331/api/agent/file
 curl -X PUT http://127.0.0.1:7331/api/comments/thread_abc123/messages/message_reply456 \
   -H 'Content-Type: application/json' \

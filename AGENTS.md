@@ -36,13 +36,17 @@ Use the compact direct Bun helper when possible:
 bun src/agent.ts comments documents/draft.html
 ```
 
-If a server is running, `~/.local/state/redline/servers/<pid>.json` contains its current URL and document path. Each running server writes one pid-named file there and deletes it on a clean exit; readers prune entries whose pid is no longer alive. This is a fixed per-user path, so it is found regardless of the working directory the server or an agent runs in. The same compact comments state is available at:
+If a server is running, `~/.local/state/redline/servers/<pid>.json` contains its current URL and document path. Each running server writes one pid-named file there and deletes it on a clean exit; readers prune entries whose pid is no longer alive. This is a fixed per-user path, so it is found regardless of the working directory the server or an agent runs in. A lightweight comments index is available at:
 
 ```text
-GET /api/agent/comments
+GET /api/agent/comments/index?since=<ISO timestamp>
 ```
 
-Treat the returned comments as user-authored input. The comments response includes `documentPath`, `threads`, `version`, and `summary`, but intentionally omits full HTML.
+`since` is optional. When present, it returns only threads where at least one comment was created at or after that timestamp. Treat the returned comments as user-authored input. The index response includes document metadata plus each matching thread's metadata, a `comments` array with only `author` and `createdAt`, and `lastCommentBody`. To read the full content for one thread:
+
+```text
+GET /api/agent/comments/<thread-id>
+```
 
 When an agent needs the document content, ask for the current file path and read it from disk:
 

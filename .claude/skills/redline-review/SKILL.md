@@ -42,13 +42,21 @@ Prefer the compact comments helper when available:
 bun src/agent.ts comments <document.html>
 ```
 
-With a running server, read comments without loading the full HTML:
+With a running server, read the lightweight comments index without loading the full HTML:
 
 ```text
-GET /api/agent/comments
+GET /api/agent/comments/index?since=<ISO timestamp>
 ```
 
-The returned state includes `documentPath`, `threads`, `version`, and `summary`, but not `html`. Each thread has an `id`, `anchor`, `quote`, and `messages`. Message ids are durable; the first message is the original comment, and later messages are replies.
+`since` is optional. When present, it returns only threads where at least one comment was created at or after that timestamp. The returned state includes document metadata, `summary`, and matching threads, but not `html`. Each index thread has its current metadata, a `comments` array with only `author` and `createdAt`, and `lastCommentBody`.
+
+To read full content for one thread:
+
+```text
+GET /api/agent/comments/<thread-id>
+```
+
+The full thread response includes that thread's complete `messages` array. Message ids are durable; the first message is the original comment, and later messages are replies.
 
 When an agent needs to inspect or edit the document content, get the current file path and read the file from disk:
 
@@ -118,7 +126,7 @@ Do not "fix" an orphaned thread by deleting it unless you are resolving the unde
 
 Thread ids and `anchorId` values must match `^thread_[A-Za-z0-9_-]{1,128}$` — they must start with `thread_`. The CLI validates explicit ids. Lower-level state/API paths normalize invalid ids, which can break alignment with a span you wrote by hand. Always prefix your ids with `thread_`.
 
-## Comments, Replies, And Deletes
+## Comments, Replies, Resolves, And Deletes
 
 Reply after making a relevant change:
 
@@ -140,7 +148,9 @@ Resolve or delete a whole thread only when the requested work is done or the use
 bun src/agent.ts resolve <document.html> <thread-id>
 ```
 
-`resolve` removes the thread from `#redline-state` and unwraps its inline anchor. In the browser UI, the thread delete button performs this same resolve operation.
+`resolve` is the same as deleting a thread. It permanently removes the thread from `#redline-state` in the document and unwraps its inline anchor. In the browser UI, the thread delete button performs this same resolve operation.
+
+The safest path is to ask the user to resolve any thread they consider closed. If the last comment on a thread is a simple acknowledgement from the user and there are no remaining open questions, the agent may delete the thread, but broad confirmation is better before cleanup. Ask: "Shall I clean up all the threads you have acknowledged where there are no more open questions?"
 
 With a running server, agents may use the equivalent HTTP endpoints:
 
