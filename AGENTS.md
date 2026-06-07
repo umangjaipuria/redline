@@ -72,7 +72,7 @@ Use your actual agent name for `--author` (for example `Codex` or `Claude`). If 
 bun src/agent.ts comment documents/draft.html "reviewed text" "This second mention needs a source." --occurrence 2 --author Codex
 ```
 
-The helper records `textPosition`, `prefix`, and `suffix` for the selected occurrence so the browser can highlight the intended text.
+The helper records `anchor.occurrence` for the selected occurrence and wraps the intended text in a durable `data-redline-anchor` span.
 
 To reply without changing the document:
 

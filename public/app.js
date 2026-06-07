@@ -3,6 +3,7 @@ import {
   commentNavigationState,
   commentNavigationTarget,
   createProgrammaticScrollGuard,
+  findQuoteMatches,
   openAncestorDetails,
   removeRuntimeOpenedDetails,
   sortThreadsForRail,
@@ -1077,23 +1078,29 @@ function updateSelection({ showFab = false } = {}) {
     return;
   }
 
-  const preRange = doc.createRange();
-  preRange.selectNodeContents(doc.body);
-  preRange.setEnd(range.startContainer, range.startOffset);
-  const start = preRange.toString().length;
-  const end = start + selection.toString().length;
-  const fullText = doc.body.textContent ?? "";
+  // Count against the same text basis the server uses: body text with
+  // <script>/<style> excluded (see collectAnchorText / locateTextOffset).
+  const fullText = collectAnchorText(doc.body);
+  const start = anchorTextOffsetAt(doc.body, range.startContainer, range.startOffset);
+
+  // Only record an occurrence when the quote repeats. A unique quote needs none,
+  // and omitting it means that if the text later duplicates and the span is lost,
+  // the thread orphans honestly instead of silently re-anchoring to the first copy.
+  const matches = findQuoteMatches(fullText, quote);
+  const anchor = { type: "text-range", quote };
+  if (matches.length > 1) {
+    let occurrence = 1;
+    for (const match of matches) {
+      if (match.start >= start) break;
+      occurrence += 1;
+    }
+    anchor.occurrence = occurrence;
+  }
 
   pendingSelection = {
     quote,
     range: range.cloneRange(),
-    anchor: {
-      type: "text-range",
-      quote,
-      prefix: fullText.slice(Math.max(0, start - 120), start),
-      suffix: fullText.slice(end, end + 120),
-      textPosition: { start, end },
-    },
+    anchor,
   };
   updateToolbar();
   if (showFab) {
@@ -1378,17 +1385,24 @@ function ensurePendingInlineAnchor() {
   if (!anchorElement || !doc.body.contains(anchorElement)) return false;
 
   const threadId = newThreadId();
-  if (!insertHighlightSpan(doc, range, threadId, { persistent: true })) {
-    return false;
-  }
-
   pendingSelection.threadId = threadId;
-  pendingSelection.anchor = {
-    ...pendingSelection.anchor,
-    anchorId: threadId,
-  };
-  anchoredThreadIds.add(threadId);
-  syncHighlightSelection();
+
+  if (insertHighlightSpan(doc, range, threadId, { persistent: true })) {
+    pendingSelection.anchor = {
+      ...pendingSelection.anchor,
+      anchorId: threadId,
+    };
+    anchoredThreadIds.add(threadId);
+    syncHighlightSelection();
+  } else {
+    // The selection can't be wrapped as one inline span (e.g. it crosses a block
+    // boundary). Create the thread span-less; the server anchors it by quote +
+    // occurrence — matching its own degrade-to-span-less behavior — instead of
+    // persisting invalid `<span><p>…</p></span>` markup.
+    const anchor = { ...pendingSelection.anchor };
+    delete anchor.anchorId;
+    pendingSelection.anchor = anchor;
+  }
   return true;
 }
 
@@ -1879,11 +1893,12 @@ function applyHighlights() {
     anchoredThreadIds.add(thread.id);
   }
 
+  const anchorText = collectAnchorText(doc.body);
   const ranges = state.threads
     .filter((thread) => !anchoredThreadIds.has(thread.id))
     .map((thread) => ({
       thread,
-      range: findRangeForAnchor(doc.body, thread.anchor),
+      range: findRangeForAnchor(anchorText, thread.anchor),
     }))
     .filter((item) => item.range)
     .sort((left, right) => right.range.start - left.range.start);
@@ -1895,77 +1910,14 @@ function applyHighlights() {
   }
 }
 
-function findRangeForAnchor(root, anchor) {
+function findRangeForAnchor(text, anchor) {
   if (anchor.type !== "text-range") return null;
-  const text = root.textContent ?? "";
-  const quote = anchor.quote ?? "";
-
-  if (anchor.textPosition) {
-    const { start, end } = anchor.textPosition;
-    if (start >= 0 && end > start && text.slice(start, end).replace(/\s+/g, " ").trim() === quote) {
-      return { start, end };
-    }
-  }
-
-  if (!quote) return null;
-  const contextual = findContextualRange(text, quote, anchor.prefix, anchor.suffix);
-  if (contextual) return contextual;
-
-  const exact = text.indexOf(quote);
-  if (exact !== -1) {
-    return { start: exact, end: exact + quote.length };
-  }
-
-  const normalizedText = text.replace(/\s+/g, " ");
-  const normalizedQuote = quote.replace(/\s+/g, " ");
-  const normalizedIndex = normalizedText.indexOf(normalizedQuote);
-  if (normalizedIndex === -1) return null;
-  return mapNormalizedRange(text, normalizedIndex, normalizedIndex + normalizedQuote.length);
-}
-
-function findContextualRange(text, quote, prefix = "", suffix = "") {
-  if (!prefix && !suffix) return null;
-  const matches = [];
-  let startAt = 0;
-
-  while (startAt <= text.length) {
-    const start = text.indexOf(quote, startAt);
-    if (start === -1) break;
-    const end = start + quote.length;
-    const prefixMatches = !prefix || text.slice(0, start).endsWith(prefix);
-    const suffixMatches = !suffix || text.slice(end).startsWith(suffix);
-    if (prefixMatches && suffixMatches) {
-      matches.push({ start, end });
-    }
-    startAt = end;
-  }
-
-  return matches.length === 1 ? matches[0] : null;
-}
-
-function mapNormalizedRange(original, normalizedStart, normalizedEnd) {
-  let normalizedIndex = 0;
-  let start = null;
-  let end = null;
-  let inWhitespace = false;
-
-  for (let index = 0; index < original.length; index += 1) {
-    const char = original[index];
-    const isWhitespace = /\s/.test(char);
-    if (isWhitespace && inWhitespace) continue;
-
-    if (normalizedIndex === normalizedStart && start === null) start = index;
-    if (normalizedIndex === normalizedEnd && end === null) {
-      end = index;
-      break;
-    }
-
-    normalizedIndex += 1;
-    inWhitespace = isWhitespace;
-  }
-
-  if (start === null) return null;
-  return { start, end: end ?? original.length };
+  const matches = findQuoteMatches(text, anchor.quote ?? "");
+  if (matches.length === 0) return null;
+  if (matches.length === 1) return matches[0];
+  const occurrence = Number.isInteger(anchor.occurrence) ? anchor.occurrence : null;
+  if (occurrence === null || occurrence < 1 || occurrence > matches.length) return null;
+  return matches[occurrence - 1];
 }
 
 function wrapRange(doc, range, threadId) {
@@ -1980,7 +1932,22 @@ function wrapRange(doc, range, threadId) {
   return insertHighlightSpan(doc, domRange, threadId);
 }
 
+const BLOCK_LEVEL_SELECTOR =
+  "address,article,aside,blockquote,details,dd,div,dl,dt,fieldset,figcaption," +
+  "figure,footer,form,h1,h2,h3,h4,h5,h6,header,hgroup,hr,li,main,nav,ol,p,pre," +
+  "section,table,tbody,td,tfoot,th,thead,tr,ul";
+
+// A range can only become a single inline <span> if it stays within inline
+// content. extractContents() is destructive and would otherwise split blocks
+// into a content-model-invalid `<span><p>…</p><p>…</p></span>`, so check
+// non-destructively (cloneContents) first and bail before mutating the DOM.
+function rangeCrossesBlock(domRange) {
+  return domRange.cloneContents().querySelector(BLOCK_LEVEL_SELECTOR) !== null;
+}
+
 function insertHighlightSpan(doc, domRange, threadId, { persistent = false } = {}) {
+  if (rangeCrossesBlock(domRange)) return false;
+
   const span = doc.createElement("span");
   span.className = "redline-highlight";
   span.setAttribute("data-thread-id", threadId);
@@ -1998,9 +1965,62 @@ function insertHighlightSpan(doc, domRange, threadId, { persistent = false } = {
   }
 }
 
-function locateTextOffset(root, offset) {
+// A text-node walker that skips <script>/<style> content, so the browser's
+// anchoring text basis matches the server's (state.ts textContentForAnchoring,
+// which strips script/style). All three of collectAnchorText, anchorTextOffsetAt,
+// and locateTextOffset use this walker so the matching text, the producer offset,
+// and the offset->DOM mapping all agree.
+function makeAnchorTextWalker(root) {
   const doc = root.ownerDocument;
-  const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  return doc.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      for (let el = node.parentNode; el && el !== root; el = el.parentNode) {
+        if (el.nodeName === "SCRIPT" || el.nodeName === "STYLE") {
+          return NodeFilter.FILTER_REJECT;
+        }
+      }
+      return NodeFilter.FILTER_ACCEPT;
+    },
+  });
+}
+
+function collectAnchorText(root) {
+  const walker = makeAnchorTextWalker(root);
+  let text = "";
+  while (walker.nextNode()) text += walker.currentNode.nodeValue;
+  return text;
+}
+
+// Length of the anchoring text before a DOM point (container, offset), handling
+// both text-node and element-node containers (e.g. a selection starting at a
+// paragraph boundary).
+function anchorTextOffsetAt(root, container, offset) {
+  const doc = root.ownerDocument;
+  const point = doc.createRange();
+  point.setStart(container, offset);
+  const walker = makeAnchorTextWalker(root);
+  let total = 0;
+
+  while (walker.nextNode()) {
+    const node = walker.currentNode;
+    if (node === container) {
+      return total + Math.min(Math.max(offset, 0), node.nodeValue.length);
+    }
+    const nodeStart = doc.createRange();
+    nodeStart.setStart(node, 0);
+    // If the point is at or before this node's start, it falls in the gap before
+    // this node — the accumulated length is the answer.
+    if (point.compareBoundaryPoints(Range.START_TO_START, nodeStart) <= 0) {
+      return total;
+    }
+    total += node.nodeValue.length;
+  }
+
+  return total;
+}
+
+function locateTextOffset(root, offset) {
+  const walker = makeAnchorTextWalker(root);
   let currentOffset = 0;
   let lastNode = null;
 

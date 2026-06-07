@@ -1,11 +1,6 @@
 interface RailThreadLike {
   id: string;
   createdAt?: string;
-  anchor?: {
-    textPosition?: {
-      start?: number | null;
-    } | null;
-  } | null;
 }
 
 interface AnchorElementLike {
@@ -25,6 +20,18 @@ interface QueryRootLike<TElement> {
 }
 
 export const MISSING_THREAD_ORDER: number;
+
+export interface QuoteMatch {
+  start: number;
+  end: number;
+}
+
+export function findQuoteMatches(text: string, quote: string): QuoteMatch[];
+
+export function normalizeWithOffsets(text: string): {
+  normalized: string;
+  offsets: number[];
+};
 
 export interface AlignedRailItemTopInput {
   edgePadding?: number;

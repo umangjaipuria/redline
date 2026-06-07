@@ -1,5 +1,67 @@
 export const MISSING_THREAD_ORDER = Number.MAX_SAFE_INTEGER;
 
+// The single source of truth for resolving a comment quote to character ranges,
+// shared by the browser (public/app.js) and the server (src/state.ts) so an
+// `occurrence` index chosen in one resolves to the same span in the other. The
+// rule: collapse whitespace runs to one space, match case-insensitively, and
+// return every match as a {start, end} range over the ORIGINAL text, in document
+// order. Operates on already-extracted text (no HTML/tag handling here).
+export function findQuoteMatches(text, quote) {
+  // Mirror the server's normalizeQuote: collapse, trim, cap at 500, then lower.
+  // The cap keeps occurrence counts identical for very long selections (the
+  // server stores and re-locates the truncated quote).
+  const needle = String(quote ?? "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 500)
+    .toLowerCase();
+  if (!needle) return [];
+
+  const { normalized, offsets } = normalizeWithOffsets(String(text ?? ""));
+  const matches = [];
+  let from = 0;
+  while (from <= normalized.length) {
+    const at = normalized.indexOf(needle, from);
+    if (at === -1) break;
+    const start = offsets[at];
+    const end = offsets[at + needle.length];
+    if (start !== undefined && end !== undefined && end > start) {
+      matches.push({ start, end });
+    }
+    from = at + Math.max(needle.length, 1);
+  }
+  return matches;
+}
+
+// Whitespace-collapsed, lowercased copy of `text` plus a per-character map back
+// to original indices. `offsets` has a trailing text.length entry so a match end
+// maps to the original index just past the matched run. Lowercasing that expands
+// to multiple code units (e.g. "İ") maps each unit to the same original index.
+export function normalizeWithOffsets(text) {
+  let normalized = "";
+  const offsets = [];
+  let inWhitespace = false;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index] ?? "";
+    if (/\s/.test(char)) {
+      if (inWhitespace) continue;
+      inWhitespace = true;
+      normalized += " ";
+      offsets.push(index);
+      continue;
+    }
+    inWhitespace = false;
+    for (const lowerChar of char.toLowerCase()) {
+      normalized += lowerChar;
+      offsets.push(index);
+    }
+  }
+  offsets.push(text.length);
+
+  return { normalized, offsets };
+}
+
 export function alignedRailItemTop({
   railScrollTop = 0,
   railViewportTop = 0,
@@ -96,10 +158,8 @@ export function stackedRailItemLayout({
 
 export function sortThreadsForRail(threads, liveOrder = new Map()) {
   return [...(threads ?? [])].sort((left, right) => {
-    const leftStart =
-      liveOrder.get(left.id) ?? left.anchor?.textPosition?.start ?? MISSING_THREAD_ORDER;
-    const rightStart =
-      liveOrder.get(right.id) ?? right.anchor?.textPosition?.start ?? MISSING_THREAD_ORDER;
+    const leftStart = liveOrder.get(left.id) ?? MISSING_THREAD_ORDER;
+    const rightStart = liveOrder.get(right.id) ?? MISSING_THREAD_ORDER;
     return leftStart - rightStart || String(left.createdAt ?? "").localeCompare(String(right.createdAt ?? ""));
   });
 }

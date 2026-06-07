@@ -103,7 +103,6 @@ test("creates, replies to, and resolves comment threads", () => {
     anchor: {
       type: "text-range",
       quote: "Hello world.",
-      textPosition: { start: 0, end: 12 },
     },
   });
 
@@ -130,7 +129,6 @@ test("text-range comments insert durable inline anchors", () => {
     anchor: {
       type: "text-range",
       quote: "Hello world.",
-      textPosition: { start: 0, end: 12 },
     },
   });
   const threadId = withComment.threads[0]?.id ?? "";
@@ -190,10 +188,10 @@ test("text-range comments reject unmappable quotes instead of saving spanless an
         quote: "Missing target text.",
       },
     }),
-  ).toThrow("Text-range comment could not be anchored");
+  ).toThrow("Quoted text was not found in the document body.");
 });
 
-test("bare text-range comments require a unique quote before inserting an anchor", () => {
+test("bare text-range comments require an occurrence when the quote repeats", () => {
   const documentPath = tempDocument();
   fs.writeFileSync(
     documentPath,
@@ -209,7 +207,31 @@ test("bare text-range comments require a unique quote before inserting an anchor
         quote: "Hello world.",
       },
     }),
-  ).toThrow("Text-range comment could not be anchored");
+  ).toThrow("Quoted text appears 2 times");
+});
+
+test("text-range comments anchor the requested occurrence of a repeated quote", () => {
+  const documentPath = tempDocument();
+  fs.writeFileSync(
+    documentPath,
+    "<!doctype html><html><body><p>Hello world.</p><p>Hello world.</p></body></html>",
+  );
+
+  const withComment = createComment(documentPath, {
+    threadId: "thread_second_match",
+    body: "Second one.",
+    quote: "Hello world.",
+    anchor: {
+      type: "text-range",
+      quote: "Hello world.",
+      occurrence: 2,
+    },
+  });
+
+  expect(withComment.threads[0]?.anchor.occurrence).toBe(2);
+  expect(withComment.html).toContain(
+    '<p><span data-redline-anchor="thread_second_match">Hello world.</span></p></body>',
+  );
 });
 
 test("text-range comments can anchor uniquely matched css-transformed casing", () => {
@@ -233,6 +255,79 @@ test("text-range comments can anchor uniquely matched css-transformed casing", (
   expect(withComment.html).toContain(
     '<span data-redline-anchor="thread_columns_label">columns (River/Hermes-shaped)</span>',
   );
+});
+
+test("text-range comments match quotes across decoded typographic entities", () => {
+  const documentPath = tempDocument();
+  fs.writeFileSync(
+    documentPath,
+    "<!doctype html><html><body><p>It&rsquo;s the team&mdash;all of it.</p></body></html>",
+  );
+
+  const withComment = createComment(documentPath, {
+    threadId: "thread_entity",
+    body: "Check the phrasing.",
+    quote: "It’s the team—all of it.",
+    anchor: { type: "text-range", quote: "It’s the team—all of it." },
+  });
+
+  expect(withComment.threads[0]?.anchor.anchorId).toBe("thread_entity");
+  expect(withComment.html).toContain(
+    '<span data-redline-anchor="thread_entity">It&rsquo;s the team&mdash;all of it.</span>',
+  );
+});
+
+test("text-range comments spanning a block boundary stay span-less but are kept", () => {
+  const documentPath = tempDocument();
+  fs.writeFileSync(
+    documentPath,
+    "<!doctype html><html><body><p>Hello</p>\n<p>world</p></body></html>",
+  );
+
+  const withComment = createComment(documentPath, {
+    threadId: "thread_cross",
+    body: "Crosses a paragraph boundary.",
+    quote: "Hello world",
+    anchor: { type: "text-range", quote: "Hello world" },
+  });
+
+  // The quote resolves (whitespace between the blocks collapses to a space), but
+  // it cannot be wrapped without crossing the </p><p> boundary, so the thread is
+  // kept span-less and the markup is left valid rather than rejected or corrupted.
+  expect(withComment.threads).toHaveLength(1);
+  expect(withComment.html).not.toContain("<span data-redline-anchor");
+  expect(withComment.html).toContain("<p>Hello</p>\n<p>world</p>");
+});
+
+test("text-range comments wrap inline markup whose attributes contain '>'", () => {
+  const documentPath = tempDocument();
+  fs.writeFileSync(
+    documentPath,
+    '<!doctype html><html><body><p>a<span data-x="/>">b</span>c</p></body></html>',
+  );
+
+  const withComment = createComment(documentPath, {
+    threadId: "thread_attr",
+    body: "Spans an inline element with a tricky attribute.",
+    quote: "abc",
+    anchor: { type: "text-range", quote: "abc" },
+  });
+
+  // The wrapped slice is tag-balanced (an inline <span> with a "/>"-containing
+  // attribute), so it must anchor rather than be mistaken for crossed markup.
+  expect(withComment.html).toContain('<span data-redline-anchor="thread_attr">');
+});
+
+test("text-range comments reject an occurrence beyond the match count", () => {
+  const documentPath = tempDocument();
+
+  expect(() =>
+    createComment(documentPath, {
+      body: "Too far.",
+      quote: "Hello world.",
+      anchor: { type: "text-range", quote: "Hello world.", occurrence: 3 },
+    }),
+  ).toThrow("Quoted text appears 1 times, but occurrence 3 was requested.");
 });
 
 test("reads compact agent states without returning html", () => {
@@ -384,7 +479,6 @@ test("agent updates can replace html and append replies together", () => {
     anchor: {
       type: "text-range",
       quote: "Hello world.",
-      textPosition: { start: 0, end: 12 },
     },
   });
   const threadId = withComment.threads[0]?.id ?? "";
@@ -437,7 +531,6 @@ test("agent updates insert durable inline anchors for new text comments", () => 
         anchor: {
           type: "text-range",
           quote: "Hello world.",
-          textPosition: { start: 0, end: 12 },
         },
       },
     ],
@@ -486,8 +579,6 @@ test("repairing document anchors materializes old spanless text threads", () => 
           type: "text-range",
           anchorId: "thread_old",
           quote: "Hello world.",
-          prefix: "",
-          suffix: "",
         },
         quote: "Hello world.",
         author: "Codex",
@@ -615,7 +706,6 @@ test("browser-created comments keep inline anchors in the html", () => {
       type: "text-range",
       anchorId: "thread_inline123",
       quote: "Hello world.",
-      textPosition: { start: 0, end: 12 },
     },
   });
 
@@ -643,7 +733,6 @@ test("browser-created comments merge with existing embedded comments", () => {
       type: "text-range",
       anchorId: "thread_inline456",
       quote: "Hello world.",
-      textPosition: { start: 0, end: 12 },
     },
   });
 

@@ -5,6 +5,8 @@ import {
   commentNavigationState,
   commentNavigationTarget,
   createProgrammaticScrollGuard,
+  findQuoteMatches,
+  normalizeWithOffsets,
   openAncestorDetails,
   removeRuntimeOpenedDetails,
   sortThreadsForRail,
@@ -183,19 +185,25 @@ test("sorts comment threads by live anchor order before stale text positions", (
   expect(threads.map((item) => item.id)).toEqual(["thread_top", "thread_middle", "thread_bottom"]);
 });
 
-test("falls back to text position, missing positions last, and created time for ties", () => {
-  const sorted = sortThreadsForRail([
-    thread("thread_missing", undefined, "2026-01-01T00:00:00.000Z"),
-    thread("thread_later_tie", 12, "2026-01-03T00:00:00.000Z"),
-    thread("thread_early", 3, "2026-01-02T00:00:00.000Z"),
-    thread("thread_earlier_tie", 12, "2026-01-01T00:00:00.000Z"),
-  ]);
+test("orders threads without a live anchor last, by created time", () => {
+  const sorted = sortThreadsForRail(
+    [
+      thread("thread_missing_early", undefined, "2026-01-01T00:00:00.000Z"),
+      thread("thread_second", 0, "2026-01-03T00:00:00.000Z"),
+      thread("thread_first", 0, "2026-01-02T00:00:00.000Z"),
+      thread("thread_missing_late", undefined, "2026-01-04T00:00:00.000Z"),
+    ],
+    new Map([
+      ["thread_first", 0],
+      ["thread_second", 1],
+    ]),
+  );
 
   expect(sorted.map((item) => item.id)).toEqual([
-    "thread_early",
-    "thread_earlier_tie",
-    "thread_later_tie",
-    "thread_missing",
+    "thread_first",
+    "thread_second",
+    "thread_missing_early",
+    "thread_missing_late",
   ]);
 });
 
@@ -329,10 +337,44 @@ test("programmatic scroll guard ignores canceled and stale timers", () => {
   expect(cleared).toEqual([null, 1, null, 2]);
 });
 
-function thread(id: string, start: number | undefined, createdAt: string) {
-  return {
-    id,
-    createdAt,
-    anchor: start === undefined ? { type: "text-range" } : { type: "text-range", textPosition: { start } },
-  };
+function thread(id: string, _start: number | undefined, createdAt: string) {
+  return { id, createdAt };
 }
+
+// The shared matcher is the parity contract between browser (app.js) and server
+// (state.ts). These guard the regressions Codex flagged in review.
+test("findQuoteMatches collapses whitespace and matches case-insensitively", () => {
+  const text = "The   Quick brown\nfox";
+  const matches = findQuoteMatches(text, "quick brown fox");
+  expect(matches).toHaveLength(1);
+  expect(text.slice(matches[0]!.start, matches[0]!.end)).toBe("Quick brown\nfox");
+});
+
+test("findQuoteMatches returns every occurrence in document order, case-insensitively", () => {
+  const matches = findQuoteMatches("ab AB ab", "ab");
+  expect(matches.map((match) => match.start)).toEqual([0, 3, 6]);
+});
+
+test("findQuoteMatches matches across whitespace at element boundaries", () => {
+  // Mirrors body text extracted from <p>Hello</p>\n<p>world</p>.
+  const text = "Hello\nworld";
+  const matches = findQuoteMatches(text, "hello world");
+  expect(matches).toHaveLength(1);
+  expect(text.slice(matches[0]!.start, matches[0]!.end)).toBe("Hello\nworld");
+});
+
+test("findQuoteMatches ignores leading/trailing whitespace in the quote", () => {
+  expect(findQuoteMatches("  padded text  ", " Padded Text ")).toHaveLength(1);
+});
+
+test("normalizeWithOffsets keeps offsets aligned when lowercasing expands a character", () => {
+  // İ (U+0130) lowercases to "i" + combining dot above (two code units).
+  const text = "AİB";
+  const { normalized, offsets } = normalizeWithOffsets(text);
+  expect(normalized).toBe("ai̇b");
+  expect(offsets[offsets.length - 1]).toBe(text.length);
+
+  const matches = findQuoteMatches(text, "İ");
+  expect(matches).toHaveLength(1);
+  expect(text.slice(matches[0]!.start, matches[0]!.end)).toBe("İ");
+});

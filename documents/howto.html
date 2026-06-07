@@ -273,7 +273,7 @@
         }
       }
     </style>
-  <script type="application/json" id="redline-state">{"schemaVersion":1,"updatedAt":"2026-06-05T05:04:05.667Z","threads":[{"id":"thread_demo_lede","anchor":{"type":"text-range","anchorId":"thread_demo_lede","quote":"review HTML locally with comments","prefix":"","suffix":""},"quote":"review HTML locally with comments","author":"User","createdAt":"2026-06-02T16:00:00.000Z","updatedAt":"2026-06-04T23:27:01.821Z","messages":[{"id":"msg_demo_1","author":"User","body":"Each comment sits level with the text it points at - like notes in a margin.","createdAt":"2026-06-02T16:00:00.000Z"},{"id":"message_323f28cf75364012","author":"AI","body":"And an agent's reply threads right under your comment, tagged with its name.","createdAt":"2026-06-04T23:27:01.821Z"}]},{"id":"thread_demo_anchor","anchor":{"type":"text-range","anchorId":"thread_demo_anchor","quote":"data-redline-anchor spans","prefix":"","suffix":""},"quote":"data-redline-anchor spans","author":"User","createdAt":"2026-06-02T16:01:00.000Z","updatedAt":"2026-06-02T16:01:00.000Z","messages":[{"id":"msg_demo_2","author":"User","body":"When two anchors sit close together, their cards pack so they do not overlap.","createdAt":"2026-06-02T16:01:00.000Z"}]},{"id":"thread_demo_resolve","anchor":{"type":"text-range","anchorId":"thread_demo_resolve","quote":"resolve completed threads","prefix":"","suffix":""},"quote":"resolve completed threads","author":"User","createdAt":"2026-06-02T16:02:00.000Z","updatedAt":"2026-06-04T23:27:01.797Z","messages":[{"id":"msg_demo_3","author":"User","body":"Click a comment (or the highlighted text) and it springs to its anchor and lights up.","createdAt":"2026-06-02T16:02:00.000Z"}]}]}</script>
+  <script type="application/json" id="redline-state">{"schemaVersion":1,"updatedAt":"2026-06-05T05:04:05.667Z","threads":[{"id":"thread_demo_lede","anchor":{"type":"text-range","anchorId":"thread_demo_lede","quote":"review HTML locally with comments"},"quote":"review HTML locally with comments","author":"User","createdAt":"2026-06-02T16:00:00.000Z","updatedAt":"2026-06-04T23:27:01.821Z","messages":[{"id":"msg_demo_1","author":"User","body":"Each comment sits level with the text it points at - like notes in a margin.","createdAt":"2026-06-02T16:00:00.000Z"},{"id":"message_323f28cf75364012","author":"AI","body":"And an agent's reply threads right under your comment, tagged with its name.","createdAt":"2026-06-04T23:27:01.821Z"}]},{"id":"thread_demo_anchor","anchor":{"type":"text-range","anchorId":"thread_demo_anchor","quote":"data-redline-anchor spans"},"quote":"data-redline-anchor spans","author":"User","createdAt":"2026-06-02T16:01:00.000Z","updatedAt":"2026-06-02T16:01:00.000Z","messages":[{"id":"msg_demo_2","author":"User","body":"When two anchors sit close together, their cards pack so they do not overlap.","createdAt":"2026-06-02T16:01:00.000Z"}]},{"id":"thread_demo_resolve","anchor":{"type":"text-range","anchorId":"thread_demo_resolve","quote":"resolve completed threads"},"quote":"resolve completed threads","author":"User","createdAt":"2026-06-02T16:02:00.000Z","updatedAt":"2026-06-04T23:27:01.797Z","messages":[{"id":"msg_demo_3","author":"User","body":"Click a comment (or the highlighted text) and it springs to its anchor and lights up.","createdAt":"2026-06-02T16:02:00.000Z"}]}]}</script>
   </head>
   <body>
     <main>
@@ -367,8 +367,8 @@ bun src/agent.ts apply documents/howto.html /tmp/redline-update.json</code></pre
         <div class="callout blue">
           <strong>Repeated text</strong>
           If the anchor text appears more than once, Redline will not guess. Pass <code>--occurrence N</code>, where
-          <code>N</code> is the 1-based occurrence in document order. The helper stores <code>textPosition</code>,
-          <code>prefix</code>, and <code>suffix</code> so the browser can highlight the intended copy.
+          <code>N</code> is the 1-based occurrence in document order. The helper stores <code>anchor.occurrence</code>
+          and wraps the intended copy in a durable span.
         </div>
       </section>
 
@@ -407,8 +407,8 @@ bun src/agent.ts apply documents/howto.html /tmp/redline-update.json</code></pre
           </li>
           <li>
             <strong>Quote-only threads &mdash; update the quote.</strong> With no span, edit the thread&rsquo;s
-            <code>anchor.quote</code> (and top-level <code>quote</code>, plus <code>textPosition</code>/<code>prefix</code>/<code>suffix</code>
-            if present) in <code>#redline-state</code> to the new text.
+            <code>anchor.quote</code> (and top-level <code>quote</code>, plus <code>anchor.occurrence</code> if the new text
+            repeats) in <code>#redline-state</code> to the new text.
           </li>
           <li>
             <strong>Subject removed entirely.</strong> Reply explaining the change and resolve the thread if the feedback is

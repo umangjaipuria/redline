@@ -87,9 +87,9 @@ Rules:
 A thread highlights in two ways, and you can rely on either:
 
 - **Persisted span.** If the HTML contains `<span data-redline-anchor="thread_id">…</span>`, the highlight is durable: it survives edits that move surrounding text, because the location is stored in the file.
-- **Quote match.** If there is no span, the browser re-anchors at render time by matching `anchor.textPosition` first, then `anchor.prefix`/`anchor.suffix` context, and then `anchor.quote` against the document text. The highlight appears in the browser but is *not* written back to the file.
+- **Quote match.** If there is no span, the browser re-anchors at render time by matching `anchor.quote` against the document text (whitespace-collapsed, case-insensitive). When the quote appears more than once, `anchor.occurrence` (1-based, in document order) selects which instance. The highlight appears in the browser but is *not* written back to the file.
 
-So a comment created with a unique quote, or with a quote plus `textPosition`, will still show up highlighted. The comment helpers (`comment`, `apply`, `POST /api/comments`) also insert a durable `data-redline-anchor` span when they can map the quote back to the source HTML. Hand-wrap a span only when a helper cannot map the target and you need the anchor to stay put across later text edits.
+A text-range anchor has exactly two locating fields: `anchor.quote` and an optional `anchor.occurrence`. The comment helpers (`comment`, `apply`, `POST /api/comments`) resolve the quote (plus occurrence) and insert a durable `data-redline-anchor` span. If the quote cannot be resolved to a single location — not found, or repeated with no `occurrence` — the helper **rejects** the command rather than creating a span-less thread. Hand-wrap a span yourself only when the target is inherently unquotable.
 
 ### Hidden anchor edge cases
 
@@ -104,12 +104,12 @@ A thread is *orphaned* when Redline can locate it by **neither** its `data-redli
 A thread orphans when you revise the anchored text and the anchor no longer points at it:
 
 - the `data-redline-anchor` span was removed or unwrapped, **and**
-- quote matching fails because the rewrite shifted `anchor.textPosition` and changed the text so it no longer matches `anchor.quote` (or its `prefix`/`suffix` context).
+- quote matching fails because the rewrite changed the text so it no longer matches `anchor.quote` (or `anchor.occurrence` now points at a different instance).
 
 When you rewrite anchored text, update the anchor along with the text. In order of preference:
 
 1. **Move the span (most durable).** Keep the `data-redline-anchor` span wrapped around the revised text. The span's location is persisted in the file, so it survives any rewording and the thread stays anchored regardless of quote drift. Prefer this whenever a span exists or can be added.
-2. **Update the quote (span-less threads).** If the thread relies on quote matching only, edit the thread's `anchor.quote` and top-level `quote` in `#redline-state` to the new text, and refresh `anchor.textPosition`/`prefix`/`suffix` if present. A stale quote is the most common cause of orphaning.
+2. **Update the quote (span-less threads).** If the thread relies on quote matching only, edit the thread's `anchor.quote` and top-level `quote` in `#redline-state` to the new text, and update `anchor.occurrence` if the new text repeats. A stale quote is the most common cause of orphaning.
 3. **Subject removed entirely.** If the text the comment referred to is gone, reply explaining the change and `resolve` the thread if the feedback is addressed; otherwise leave it open and orphaned for the human to decide.
 
 Do not "fix" an orphaned thread by deleting it unless you are resolving the underlying feedback.
@@ -207,7 +207,7 @@ If the same quote appears multiple times, the helper rejects the command unless 
 bun src/agent.ts comment <document.html> "growth improved by 40%" "This second claim needs a source." --occurrence 2 --author Claude
 ```
 
-The helper records the selected occurrence's `textPosition`, `prefix`, and `suffix`, and inserts a matching `data-redline-anchor` span into the source HTML when the range can be mapped.
+The helper records `anchor.occurrence` and wraps the selected occurrence in a `data-redline-anchor` span in the source HTML.
 
 On a running server, the equivalent is `POST /api/comments` with a `CreateCommentInput` body, or `bun src/agent.ts apply` / `POST /api/agent/update` with a `comments` entry when batching with replies or an HTML revision.
 
@@ -244,6 +244,6 @@ Embedded state:
 }
 ```
 
-If editing embedded state by hand and the same quote appears multiple times, do not rely on quote text alone. Insert the span around the specific occurrence in the HTML, or include `textPosition` plus `prefix` and `suffix` in `anchor` for fallback matching.
+If editing embedded state by hand and the same quote appears multiple times, do not rely on quote text alone. Insert the span around the specific occurrence in the HTML, or set `anchor.occurrence` (1-based, in document order) for fallback matching.
 
 Inside `#redline-state`, escape `<` in JSON strings as `\u003c` to avoid breaking the HTML script tag.

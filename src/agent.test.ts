@@ -70,7 +70,6 @@ test("comment helper accepts valid explicit thread ids", async () => {
   const payload = await new Response(proc.stdout).json();
   expect(payload.threads[0]?.id).toBe("thread_custom_id");
   expect(payload.threads[0]?.anchor.anchorId).toBe("thread_custom_id");
-  expect(payload.threads[0]?.anchor.textPosition).toEqual({ start: 0, end: 12 });
   expect(fs.readFileSync(documentPath, "utf8")).toContain(
     '<span data-redline-anchor="thread_custom_id">Hello world.</span>',
   );
@@ -146,7 +145,7 @@ test("comment helper rejects ambiguous quoted text without an occurrence", async
 
   expect(await proc.exited).toBe(1);
   expect(await new Response(proc.stderr).text()).toContain(
-    "Quoted text appears 2 times. Pass --occurrence N to choose the 1-based occurrence.",
+    "Quoted text appears 2 times. Pass --occurrence N (or anchor.occurrence) to choose the 1-based occurrence.",
   );
 });
 
@@ -178,8 +177,7 @@ test("comment helper can anchor a selected repeated occurrence", async () => {
   const payload = await new Response(proc.stdout).json();
   expect(payload.threads[0]?.id).toBe("thread_second_match");
   expect(payload.threads[0]?.anchor.anchorId).toBe("thread_second_match");
-  expect(payload.threads[0]?.anchor.textPosition).toEqual({ start: 12, end: 24 });
-  expect(payload.threads[0]?.anchor.prefix).toBe("Hello world.");
+  expect(payload.threads[0]?.anchor.occurrence).toBe(2);
   expect(payload.threads[0]?.messages[0]?.body).toBe("Second note.");
   expect(fs.readFileSync(documentPath, "utf8")).toContain(
     '<p><span data-redline-anchor="thread_second_match">Hello world.</span></p>',

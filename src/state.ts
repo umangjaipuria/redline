@@ -1,11 +1,9 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-
-export interface TextPosition {
-  start: number;
-  end: number;
-}
+// Shared with the browser (public/app.js) so occurrence indexing is identical on
+// both sides — see public/app-helpers.js.
+import { findQuoteMatches } from "../public/app-helpers.js";
 
 interface HtmlTextRange {
   start: number;
@@ -16,9 +14,10 @@ export interface CommentAnchor {
   type: "text-range" | "document";
   anchorId?: string;
   quote?: string;
-  prefix?: string;
-  suffix?: string;
-  textPosition?: TextPosition;
+  // 1-based index selecting which occurrence of `quote` to anchor when the
+  // document contains the same text more than once. Omitted when the quote is
+  // unique.
+  occurrence?: number;
 }
 
 export interface CommentMessage {
@@ -617,19 +616,19 @@ function prepareCommentAnchor(
     return { anchor, html };
   }
 
-  const range = findTextRangeForAnchor(html, anchor, quote);
-  if (!range) {
+  const located = locateQuote(html, quote || anchor.quote || "", anchor.occurrence);
+  if (!located.ok) {
     if (options.requireInlineAnchor) {
-      throw new Error("Text-range comment could not be anchored in the document.");
+      throw new Error(locateFailureMessage(located, anchor.occurrence));
     }
     return { anchor, html };
   }
 
-  const htmlWithAnchor = insertInlineAnchor(html, anchorId, range);
+  // The quote resolved to a location, but it can't be wrapped in a span (e.g. it
+  // spans a block boundary). Keep the thread span-less rather than reject it: the
+  // browser still re-anchors by quote + occurrence at render time.
+  const htmlWithAnchor = insertInlineAnchor(html, anchorId, located.range);
   if (!htmlWithAnchor) {
-    if (options.requireInlineAnchor) {
-      throw new Error("Text-range comment could not be anchored in the document.");
-    }
     return { anchor, html };
   }
 
@@ -637,6 +636,16 @@ function prepareCommentAnchor(
     anchor,
     html: htmlWithAnchor,
   };
+}
+
+function locateFailureMessage(failure: LocateFailure, occurrence: number | undefined): string {
+  if (failure.reason === "ambiguous") {
+    return `Quoted text appears ${failure.count} times. Pass --occurrence N (or anchor.occurrence) to choose the 1-based occurrence.`;
+  }
+  if (failure.reason === "out-of-range") {
+    return `Quoted text appears ${failure.count} times, but occurrence ${occurrence} was requested.`;
+  }
+  return "Quoted text was not found in the document body.";
 }
 
 function materializeReviewAnchors(
@@ -712,153 +721,88 @@ function inlineAnchorPattern(anchorId: string): RegExp[] {
   );
 }
 
+type LocateFailure = {
+  ok: false;
+  reason: "empty" | "not-found" | "ambiguous" | "out-of-range";
+  count: number;
+};
+type LocateResult = { ok: true; range: HtmlTextRange } | LocateFailure;
+
 function findTextRangeForAnchor(
   html: string,
   anchor: CommentAnchor,
   quote: string,
 ): HtmlTextRange | null {
   if (anchor.type !== "text-range") return null;
-
-  const text = textContentForAnchoring(html);
-  const normalizedQuote = normalizeQuote(quote || anchor.quote || "");
-  if (anchor.textPosition) {
-    const { start, end } = anchor.textPosition;
-    if (
-      start >= 0 &&
-      end > start &&
-      end <= text.length &&
-      normalizeQuote(text.slice(start, end)) === normalizedQuote
-    ) {
-      return { start, end };
-    }
-  }
-
-  if (!normalizedQuote) return null;
-
-  const contextual = findContextualTextRange(text, normalizedQuote, anchor.prefix, anchor.suffix);
-  if (contextual) return contextual;
-
-  const exact = findUniqueTextRange(text, normalizedQuote);
-  if (exact) return exact;
-
-  const caseInsensitive = findCaseInsensitiveTextRange(text, normalizedQuote);
-  if (caseInsensitive) return caseInsensitive;
-
-  return findNormalizedTextRange(text, normalizedQuote);
+  const located = locateQuote(html, quote || anchor.quote || "", anchor.occurrence);
+  return located.ok ? located.range : null;
 }
 
-function findUniqueTextRange(text: string, quote: string): HtmlTextRange | null {
-  const ranges: HtmlTextRange[] = [];
-  let startAt = 0;
-
-  while (startAt <= text.length) {
-    const start = text.indexOf(quote, startAt);
-    if (start === -1) break;
-    ranges.push({ start, end: start + quote.length });
-    startAt = start + Math.max(quote.length, 1);
-  }
-
-  return ranges.length === 1 ? ranges[0] ?? null : null;
-}
-
-function findContextualTextRange(
-  text: string,
+// Resolve a quote to a single text range using one rule: collapse whitespace,
+// match case-insensitively, and disambiguate repeats by a 1-based occurrence
+// index. Both the server (here) and the browser count occurrences the same way
+// so an occurrence chosen in one place resolves to the same span in the other.
+function locateQuote(
+  html: string,
   quote: string,
-  prefix = "",
-  suffix = "",
-): HtmlTextRange | null {
-  if (!prefix && !suffix) return null;
+  occurrence: number | undefined,
+): LocateResult {
+  const normalizedQuote = normalizeQuote(quote);
+  if (!normalizedQuote) return { ok: false, reason: "empty", count: 0 };
 
-  const matches: HtmlTextRange[] = [];
-  let startAt = 0;
-  while (startAt <= text.length) {
-    const start = text.indexOf(quote, startAt);
-    if (start === -1) break;
-    const end = start + quote.length;
-    const prefixMatches = !prefix || text.slice(0, start).endsWith(prefix);
-    const suffixMatches = !suffix || text.slice(end).startsWith(suffix);
-    if (prefixMatches && suffixMatches) {
-      matches.push({ start, end });
-    }
-    startAt = end;
+  const matches = findQuoteMatches(textContentForAnchoring(html), normalizedQuote);
+  if (matches.length === 0) return { ok: false, reason: "not-found", count: 0 };
+  if (occurrence !== undefined && (occurrence < 1 || occurrence > matches.length)) {
+    return { ok: false, reason: "out-of-range", count: matches.length };
   }
-
-  return matches.length === 1 ? matches[0] ?? null : null;
-}
-
-function findNormalizedTextRange(text: string, quote: string): HtmlTextRange | null {
-  const normalizedText = text.replace(/\s+/g, " ");
-  const normalizedQuote = quote.replace(/\s+/g, " ");
-  const matches: HtmlTextRange[] = [];
-  let startAt = 0;
-
-  while (startAt <= normalizedText.length) {
-    const normalizedStart = normalizedText.indexOf(normalizedQuote, startAt);
-    if (normalizedStart === -1) break;
-    const mapped = mapNormalizedTextRange(
-      text,
-      normalizedStart,
-      normalizedStart + normalizedQuote.length,
-    );
-    if (mapped) matches.push(mapped);
-    startAt = normalizedStart + Math.max(normalizedQuote.length, 1);
+  if (matches.length === 1) return { ok: true, range: matches[0] as HtmlTextRange };
+  if (occurrence === undefined) {
+    return { ok: false, reason: "ambiguous", count: matches.length };
   }
-
-  return matches.length === 1 ? matches[0] ?? null : null;
-}
-
-function findCaseInsensitiveTextRange(text: string, quote: string): HtmlTextRange | null {
-  const haystack = text.toLocaleLowerCase();
-  const needle = quote.toLocaleLowerCase();
-  const ranges: HtmlTextRange[] = [];
-  let startAt = 0;
-
-  while (startAt <= haystack.length) {
-    const start = haystack.indexOf(needle, startAt);
-    if (start === -1) break;
-    ranges.push({ start, end: start + quote.length });
-    startAt = start + Math.max(quote.length, 1);
-  }
-
-  return ranges.length === 1 ? ranges[0] ?? null : null;
-}
-
-function mapNormalizedTextRange(
-  text: string,
-  normalizedStart: number,
-  normalizedEnd: number,
-): HtmlTextRange | null {
-  let normalizedIndex = 0;
-  let start: number | null = null;
-  let end: number | null = null;
-  let inWhitespace = false;
-
-  for (let index = 0; index < text.length; index += 1) {
-    const isWhitespace = /\s/.test(text[index] ?? "");
-    if (isWhitespace && inWhitespace) continue;
-
-    if (normalizedIndex === normalizedStart && start === null) start = index;
-    if (normalizedIndex === normalizedEnd && end === null) {
-      end = index;
-      break;
-    }
-
-    normalizedIndex += 1;
-    inWhitespace = isWhitespace;
-  }
-
-  if (start === null) return null;
-  return { start, end: end ?? text.length };
+  return { ok: true, range: matches[occurrence - 1] as HtmlTextRange };
 }
 
 function insertInlineAnchor(html: string, anchorId: string, range: HtmlTextRange): string | null {
   const indices = htmlIndicesForTextRange(html, range);
   if (!indices || indices.start >= indices.end) return null;
 
+  const inner = html.slice(indices.start, indices.end);
+  // A span may only wrap a tag-balanced slice. A normalized quote can match
+  // across element boundaries (e.g. "Hello world" over `<p>Hello</p><p>world</p>`),
+  // and wrapping that would emit crossed, invalid markup. Bail so the caller can
+  // keep the thread span-less instead.
+  if (!spanWrapIsSafe(inner)) return null;
+
   const open = `<span data-redline-anchor="${anchorId}">`;
-  return `${html.slice(0, indices.start)}${open}${html.slice(indices.start, indices.end)}</span>${html.slice(
-    indices.end,
-  )}`;
+  return `${html.slice(0, indices.start)}${open}${inner}</span>${html.slice(indices.end)}`;
+}
+
+const voidHtmlElements = new Set([
+  "area", "base", "br", "col", "embed", "hr", "img", "input",
+  "link", "meta", "param", "source", "track", "wbr",
+]);
+
+// True when `htmlSlice` can be wrapped in a single element without breaking
+// nesting: every tag opened inside is also closed inside, and no tag closes one
+// opened before the slice.
+function spanWrapIsSafe(htmlSlice: string): boolean {
+  // The attribute group tolerates quoted values that contain ">" (e.g.
+  // title="a > b") so such tags aren't mis-tokenized into a false imbalance.
+  const tagPattern =
+    /<!--[\s\S]*?-->|<(\/?)([a-zA-Z][\w:-]*)((?:"[^"]*"|'[^']*'|[^>"'])*)>/g;
+  const open: string[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = tagPattern.exec(htmlSlice)) !== null) {
+    if (match[0].startsWith("<!--")) continue;
+    const tagName = (match[2] ?? "").toLowerCase();
+    const selfClosing = /\/\s*$/.test(match[3] ?? "");
+    if (match[1] === "/") {
+      if (open.pop() !== tagName) return false;
+    } else if (!selfClosing && !voidHtmlElements.has(tagName)) {
+      open.push(tagName);
+    }
+  }
+  return open.length === 0;
 }
 
 function renameInlineAnchor(html: string, fromAnchorId: string, toAnchorId: string): string {
@@ -1018,6 +962,25 @@ function decodeHtmlEntity(entity: string): string {
     lt: "<",
     nbsp: "\u00a0",
     quot: '"',
+    // Common typographic entities: prose documents lean on these heavily, and
+    // the browser decodes them in full, so the server must too for quote parity.
+    copy: "\u00a9",
+    reg: "\u00ae",
+    trade: "\u2122",
+    hellip: "\u2026",
+    mdash: "\u2014",
+    ndash: "\u2013",
+    lsquo: "\u2018",
+    rsquo: "\u2019",
+    ldquo: "\u201c",
+    rdquo: "\u201d",
+    laquo: "\u00ab",
+    raquo: "\u00bb",
+    bull: "\u2022",
+    middot: "\u00b7",
+    deg: "\u00b0",
+    times: "\u00d7",
+    divide: "\u00f7",
   };
   return named[body.toLowerCase()] ?? entity;
 }
@@ -1067,22 +1030,20 @@ function normalizeAnchor(input: CommentAnchor | undefined): CommentAnchor {
     type: "text-range",
     anchorId: normalizeId(input.anchorId, "thread") ?? undefined,
     quote: normalizeQuote(input.quote ?? ""),
-    prefix: typeof input.prefix === "string" ? input.prefix : "",
-    suffix: typeof input.suffix === "string" ? input.suffix : "",
   };
-  if (
-    input.textPosition &&
-    Number.isFinite(input.textPosition.start) &&
-    Number.isFinite(input.textPosition.end) &&
-    input.textPosition.end >= input.textPosition.start
-  ) {
-    anchor.textPosition = {
-      start: Math.max(0, Math.floor(input.textPosition.start)),
-      end: Math.max(0, Math.floor(input.textPosition.end)),
-    };
+  const occurrence = normalizeOccurrence(input.occurrence);
+  if (occurrence !== undefined) {
+    anchor.occurrence = occurrence;
   }
 
   return anchor;
+}
+
+function normalizeOccurrence(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1) {
+    return undefined;
+  }
+  return value;
 }
 
 function normalizeQuote(value: string): string {
