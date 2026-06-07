@@ -169,9 +169,7 @@ export function collectThreadLiveOrderFromAnchors(root) {
   if (!root?.querySelectorAll) return order;
 
   let index = 0;
-  const anchors = root.querySelectorAll(
-    ".redline-highlight[data-thread-id], .coauthor-highlight[data-thread-id]",
-  );
+  const anchors = root.querySelectorAll(".redline-highlight[data-thread-id]");
   for (const element of anchors) {
     const threadId = element.getAttribute("data-thread-id");
     if (threadId && !order.has(threadId)) {

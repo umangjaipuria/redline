@@ -278,7 +278,6 @@ function handleWithoutDocument(
     const emptyState = emptyDocumentState(runtime.howtoPath);
     return json({
       documentPath: emptyState.documentPath,
-      legacySidecarPath: emptyState.legacySidecarPath,
       version: emptyState.version,
       updatedAt: emptyState.updatedAt,
       threads: [],

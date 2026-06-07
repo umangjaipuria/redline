@@ -89,7 +89,7 @@ When a document is opened with Redline, the app adds an agent discovery marker s
 <meta name="redline-agent-guide" content="...">
 ```
 
-Resolved threads are deleted from that embedded state and their inline anchors are unwrapped. Older `.redline.json` and legacy `.coauthor.json` sidecars can still be read and are migrated into the HTML on the next write.
+Resolved threads are deleted from that embedded state and their inline anchors are unwrapped.
 
 When an agent rewrites anchored text, it should preserve or move the surrounding `data-redline-anchor` span until the thread is explicitly resolved. If the span disappears, Redline keeps the thread open in the comment rail and falls back to the saved quote.
 

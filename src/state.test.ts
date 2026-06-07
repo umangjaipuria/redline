@@ -9,7 +9,6 @@ import {
   deleteReply,
   defaultDocumentPath,
   ensureDocument,
-  legacySidecarPathFor,
   openDocumentForReview,
   readCommentState,
   readDocumentState,
@@ -17,9 +16,7 @@ import {
   repairDocumentAnchors,
   resolveDocumentPath,
   resolveThread,
-  sidecarPathFor,
   updateCommentMessage,
-  writeSidecar,
   writeDocumentHtml,
 } from "./state";
 
@@ -117,7 +114,6 @@ test("creates, replies to, and resolves comment threads", () => {
   const resolved = resolveThread(documentPath, threadId);
   expect(resolved.threads).toHaveLength(0);
   expect(fs.readFileSync(documentPath, "utf8")).not.toContain('id="redline-state"');
-  expect(fs.existsSync(sidecarPathFor(documentPath))).toBe(false);
 });
 
 test("text-range comments insert durable inline anchors", () => {
@@ -277,26 +273,46 @@ test("text-range comments match quotes across decoded typographic entities", () 
   );
 });
 
-test("text-range comments spanning a block boundary stay span-less but are kept", () => {
+const crossBlockCommentMessage =
+  "Comments cannot span block boundaries yet. Select text within one paragraph, table cell, or list item.";
+
+test("text-range comments spanning a block boundary are rejected", () => {
   const documentPath = tempDocument();
+  const html = "<!doctype html><html><body><p>Hello</p>\n<p>world</p></body></html>";
   fs.writeFileSync(
     documentPath,
-    "<!doctype html><html><body><p>Hello</p>\n<p>world</p></body></html>",
+    html,
   );
 
-  const withComment = createComment(documentPath, {
-    threadId: "thread_cross",
-    body: "Crosses a paragraph boundary.",
-    quote: "Hello world",
-    anchor: { type: "text-range", quote: "Hello world" },
-  });
+  expect(() =>
+    createComment(documentPath, {
+      threadId: "thread_cross",
+      body: "Crosses a paragraph boundary.",
+      quote: "Hello world",
+      anchor: { type: "text-range", quote: "Hello world" },
+    }),
+  ).toThrow(crossBlockCommentMessage);
+  expect(fs.readFileSync(documentPath, "utf8")).toBe(html);
+});
 
-  // The quote resolves (whitespace between the blocks collapses to a space), but
-  // it cannot be wrapped without crossing the </p><p> boundary, so the thread is
-  // kept span-less and the markup is left valid rather than rejected or corrupted.
-  expect(withComment.threads).toHaveLength(1);
-  expect(withComment.html).not.toContain("<span data-redline-anchor");
-  expect(withComment.html).toContain("<p>Hello</p>\n<p>world</p>");
+test("text-range comments reject adjacent table cells without literal whitespace", () => {
+  const documentPath = tempDocument();
+  const html =
+    "<!doctype html><html><body><table><tr><td>Alpha cell</td><td>Beta cell</td></tr></table></body></html>";
+  fs.writeFileSync(
+    documentPath,
+    html,
+  );
+
+  expect(() =>
+    createComment(documentPath, {
+      threadId: "thread_cells",
+      body: "Crosses table cells.",
+      quote: "Alpha cell Beta cell",
+      anchor: { type: "text-range", quote: "Alpha cell Beta cell" },
+    }),
+  ).toThrow(crossBlockCommentMessage);
+  expect(fs.readFileSync(documentPath, "utf8")).toBe(html);
 });
 
 test("text-range comments wrap inline markup whose attributes contain '>'", () => {
@@ -343,7 +359,6 @@ test("reads compact agent states without returning html", () => {
 
   expect(comments).toEqual({
     documentPath,
-    legacySidecarPath: legacySidecarPathFor(documentPath),
     version: withComment.version,
     updatedAt: withComment.updatedAt,
     threads: withComment.threads,
@@ -351,7 +366,6 @@ test("reads compact agent states without returning html", () => {
   });
   expect(file).toEqual({
     documentPath,
-    legacySidecarPath: legacySidecarPathFor(documentPath),
     version: withComment.version,
     updatedAt: withComment.updatedAt,
     summary: withComment.summary,
@@ -746,96 +760,4 @@ test("documents without embedded comments have stable versions", () => {
   const second = readDocumentState(documentPath);
 
   expect(first.version).toBe(second.version);
-});
-
-test("legacy sidecars migrate into the html on the next write", () => {
-  const documentPath = tempDocument();
-  writeSidecar(documentPath, {
-    schemaVersion: 1,
-    updatedAt: "2026-01-01T00:00:00.000Z",
-    threads: [
-      {
-        id: "thread_legacy",
-        anchor: { type: "document" },
-        quote: "",
-        author: "Reviewer",
-        createdAt: "2026-01-01T00:00:00.000Z",
-        updatedAt: "2026-01-01T00:00:00.000Z",
-        messages: [
-          {
-            id: "message_legacy",
-            author: "Reviewer",
-            body: "Legacy note.",
-            createdAt: "2026-01-01T00:00:00.000Z",
-          },
-        ],
-      },
-    ],
-  });
-
-  expect(readDocumentState(documentPath).threads).toHaveLength(1);
-  appendReply(documentPath, "thread_legacy", "Migrated.", "AI");
-
-  const html = fs.readFileSync(documentPath, "utf8");
-  expect(html).toContain('id="redline-state"');
-  expect(html).toContain("Legacy note.");
-  expect(fs.existsSync(sidecarPathFor(documentPath))).toBe(false);
-});
-
-test("legacy coauthor sidecars migrate into redline html on the next write", () => {
-  const documentPath = tempDocument();
-  fs.writeFileSync(
-    legacySidecarPathFor(documentPath),
-    `${JSON.stringify(
-      {
-        schemaVersion: 1,
-        updatedAt: "2026-01-01T00:00:00.000Z",
-        threads: [
-          {
-            id: "thread_coauthor_legacy",
-            anchor: { type: "document" },
-            quote: "",
-            author: "Reviewer",
-            createdAt: "2026-01-01T00:00:00.000Z",
-            updatedAt: "2026-01-01T00:00:00.000Z",
-            messages: [
-              {
-                id: "message_coauthor_legacy",
-                author: "Reviewer",
-                body: "Old sidecar note.",
-                createdAt: "2026-01-01T00:00:00.000Z",
-              },
-            ],
-          },
-        ],
-      },
-      null,
-      2,
-    )}\n`,
-  );
-
-  expect(readDocumentState(documentPath).threads).toHaveLength(1);
-  appendReply(documentPath, "thread_coauthor_legacy", "Migrated.", "AI");
-
-  const html = fs.readFileSync(documentPath, "utf8");
-  expect(html).toContain('id="redline-state"');
-  expect(html).toContain("Old sidecar note.");
-  expect(fs.existsSync(legacySidecarPathFor(documentPath))).toBe(false);
-});
-
-test("legacy coauthor embedded state and anchors migrate on write", () => {
-  const documentPath = tempDocument();
-  fs.writeFileSync(
-    documentPath,
-    '<!doctype html><html><head><script type="application/json" id="coauthor-state">{"schemaVersion":1,"updatedAt":"2026-01-01T00:00:00.000Z","threads":[{"id":"thread_old_anchor","anchor":{"type":"text-range","anchorId":"thread_old_anchor","quote":"Hello world."},"quote":"Hello world.","author":"Reviewer","createdAt":"2026-01-01T00:00:00.000Z","updatedAt":"2026-01-01T00:00:00.000Z","messages":[{"id":"message_old_anchor","author":"Reviewer","body":"Old inline anchor.","createdAt":"2026-01-01T00:00:00.000Z"}]}]}</script></head><body><p><span data-coauthor-anchor="thread_old_anchor">Hello world.</span></p></body></html>',
-  );
-
-  expect(readDocumentState(documentPath).threads).toHaveLength(1);
-  appendReply(documentPath, "thread_old_anchor", "Migrated.", "AI");
-
-  const html = fs.readFileSync(documentPath, "utf8");
-  expect(html).toContain('id="redline-state"');
-  expect(html).not.toContain('id="coauthor-state"');
-  expect(html).toContain('data-redline-anchor="thread_old_anchor"');
-  expect(html).not.toContain("data-coauthor-anchor");
 });

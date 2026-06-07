@@ -19,6 +19,9 @@ export function clientErrorFor(error: unknown): ClientError | undefined {
   if (message.startsWith("Quoted text ")) {
     return { message, status: 422 };
   }
+  if (message.startsWith("Comments cannot span block boundaries")) {
+    return { message, status: 422 };
+  }
   if (message === "threadId and anchor.anchorId must match for anchored comments.") {
     return { message, status: 422 };
   }

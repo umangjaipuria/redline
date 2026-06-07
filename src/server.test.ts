@@ -292,6 +292,30 @@ test("POST /api/comments returns 422 when quoted text is ambiguous", async () =>
   );
 });
 
+test("POST /api/comments returns 422 when quoted text crosses block boundaries", async () => {
+  const documentPath = tempDocument(
+    "<!doctype html><html><body><table><tr><td>Alpha cell</td><td>Beta cell</td></tr></table></body></html>",
+  );
+  const handler = createRequestHandler({ documentPath, host: "127.0.0.1", port: 0 });
+
+  const response = await handler(
+    new Request("http://127.0.0.1/api/comments", {
+      method: "POST",
+      body: JSON.stringify({
+        body: "Keep this together.",
+        quote: "Alpha cell Beta cell",
+        anchor: { type: "text-range", quote: "Alpha cell Beta cell" },
+      }),
+    }),
+  );
+  const payload = await response.json();
+
+  expect(response.status).toBe(422);
+  expect(payload.error).toBe(
+    "Comments cannot span block boundaries yet. Select text within one paragraph, table cell, or list item.",
+  );
+});
+
 test("POST /api/agent/update returns 422 for invalid batched comments", async () => {
   const documentPath = tempDocument();
   const handler = createRequestHandler({ documentPath, host: "127.0.0.1", port: 0 });
@@ -314,6 +338,34 @@ test("POST /api/agent/update returns 422 for invalid batched comments", async ()
 
   expect(response.status).toBe(422);
   expect(payload.error).toBe("Quoted text was not found in the document body.");
+});
+
+test("POST /api/agent/update returns 422 for cross-block comments", async () => {
+  const documentPath = tempDocument(
+    "<!doctype html><html><body><p>Hello</p><p>world</p></body></html>",
+  );
+  const handler = createRequestHandler({ documentPath, host: "127.0.0.1", port: 0 });
+
+  const response = await handler(
+    new Request("http://127.0.0.1/api/agent/update", {
+      method: "POST",
+      body: JSON.stringify({
+        comments: [
+          {
+            body: "Keep this together.",
+            quote: "Hello world",
+            anchor: { type: "text-range", quote: "Hello world" },
+          },
+        ],
+      }),
+    }),
+  );
+  const payload = await response.json();
+
+  expect(response.status).toBe(422);
+  expect(payload.error).toBe(
+    "Comments cannot span block boundaries yet. Select text within one paragraph, table cell, or list item.",
+  );
 });
 
 test("POST /api/comments rejects stale expected versions", async () => {

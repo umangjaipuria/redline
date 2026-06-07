@@ -178,6 +178,15 @@
       </svg>
     </button>
 
+    <div id="selectionAlert" class="selection-alert-backdrop" role="alertdialog" aria-modal="true"
+      aria-labelledby="selectionAlertTitle" aria-describedby="selectionAlertBody" hidden>
+      <section class="selection-alert-box">
+        <h2 id="selectionAlertTitle">Selection too broad</h2>
+        <p id="selectionAlertBody">Select text within one paragraph, table cell, or list item to add a comment.</p>
+        <button id="selectionAlertClose" type="button" class="primary-button">OK</button>
+      </section>
+    </div>
+
     <script type="module" src="/app.js"></script>
   </body>
 </html>

@@ -26,7 +26,7 @@ Redline also stamps opened documents with an agent discovery marker:
 
 For HTML fragments, the fallback is a `redline-agent-guide` HTML comment.
 
-When revising anchored text, preserve or move the surrounding `data-redline-anchor` span until the user or agent explicitly resolves the thread. Resolving a thread deletes it from the embedded state and unwraps its inline anchor. Older `.redline.json` and legacy `.coauthor.json` sidecars can still be read and are migrated into the HTML on the next write.
+When revising anchored text, preserve or move the surrounding `data-redline-anchor` span until the user or agent explicitly resolves the thread. Resolving a thread deletes it from the embedded state and unwraps its inline anchor.
 
 ## Read Feedback
 
@@ -76,7 +76,7 @@ Use your actual agent name for `--author` (for example `Codex` or `Claude`). If 
 bun src/agent.ts comment documents/draft.html "reviewed text" "This second mention needs a source." --occurrence 2 --author Codex
 ```
 
-The helper records `anchor.occurrence` for the selected occurrence and wraps the intended text in a durable `data-redline-anchor` span.
+The helper records `anchor.occurrence` for the selected occurrence and wraps the intended text in a durable `data-redline-anchor` span. If the selected text cannot be wrapped as one valid inline span, such as a selection crossing paragraphs, table cells, or list items, Redline rejects the comment. Choose a smaller selection within one block until multi-fragment anchors exist.
 
 To reply without changing the document:
 

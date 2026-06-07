@@ -149,6 +149,33 @@ test("comment helper rejects ambiguous quoted text without an occurrence", async
   );
 });
 
+test("comment helper rejects cross-block quoted text", async () => {
+  const documentPath = tempDocument(
+    "<!doctype html><html><body><p>Hello</p><p>world</p></body></html>",
+  );
+  const proc = Bun.spawn(
+    [
+      "bun",
+      agentPath,
+      "comment",
+      documentPath,
+      "Hello world",
+      "Needs a note.",
+    ],
+    {
+      cwd: projectRoot,
+      stderr: "pipe",
+      stdout: "pipe",
+    },
+  );
+
+  expect(await proc.exited).toBe(1);
+  expect(await new Response(proc.stderr).text()).toContain(
+    "Comments cannot span block boundaries yet. Select text within one paragraph, table cell, or list item.",
+  );
+  expect(fs.readFileSync(documentPath, "utf8")).not.toContain("redline-state");
+});
+
 test("comment helper can anchor a selected repeated occurrence", async () => {
   const documentPath = tempDocument(
     "<!doctype html><html><body><p>Hello world.</p><p>Hello world.</p></body></html>",

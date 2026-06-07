@@ -35,6 +35,8 @@ const previousCommentButton = document.querySelector("#previousCommentButton");
 const nextCommentButton = document.querySelector("#nextCommentButton");
 const openButton = document.querySelector("#openButton");
 const selectionFab = document.querySelector("#selectionFab");
+const selectionAlert = document.querySelector("#selectionAlert");
+const selectionAlertClose = document.querySelector("#selectionAlertClose");
 const emptyState = document.querySelector("#emptyState");
 const emptyOpenButton = document.querySelector("#emptyOpenButton");
 const howtoHint = document.querySelector("#howtoHint");
@@ -111,6 +113,10 @@ selectionFab.addEventListener("mousedown", (event) => event.preventDefault());
 selectionFab.addEventListener("click", () => {
   beginCommentFromSelection();
 });
+selectionAlert.addEventListener("click", (event) => {
+  if (event.target === selectionAlert) hideSelectionAlert();
+});
+selectionAlertClose.addEventListener("click", hideSelectionAlert);
 window.addEventListener("scroll", repositionSelectionFab, true);
 window.addEventListener("resize", () => {
   repositionSelectionFab();
@@ -307,6 +313,12 @@ window.addEventListener("keydown", handleGlobalShortcut);
 window.addEventListener("resize", syncFrameViewport);
 
 function handleGlobalShortcut(event) {
+  if (event.key === "Escape" && !selectionAlert.hidden) {
+    event.preventDefault();
+    hideSelectionAlert();
+    return;
+  }
+
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
     event.preventDefault();
     void saveNow();
@@ -729,11 +741,8 @@ function setupFrame() {
 function prepareHtmlForFrame(html) {
   const parsed = new DOMParser().parseFromString(html, "text/html");
   parsed.querySelector("#redline-base")?.remove();
-  parsed.querySelector("#coauthor-base")?.remove();
   parsed.querySelector("#redline-runtime-style")?.remove();
-  parsed.querySelector("#coauthor-runtime-style")?.remove();
   parsed.querySelector("#redline-state")?.remove();
-  parsed.querySelector("#coauthor-state")?.remove();
 
   const base = parsed.createElement("base");
   base.id = "redline-base";
@@ -978,23 +987,19 @@ function cleanFrameHtml() {
   const doc = frame.contentDocument;
   const clone = doc.documentElement.cloneNode(true);
   clone.querySelector("#redline-base")?.remove();
-  clone.querySelector("#coauthor-base")?.remove();
   clone.querySelector("#redline-runtime-style")?.remove();
-  clone.querySelector("#coauthor-runtime-style")?.remove();
 
-  for (const node of clone.querySelectorAll(".redline-highlight, .coauthor-highlight")) {
-    if (node.hasAttribute("data-redline-anchor") || node.hasAttribute("data-coauthor-anchor")) {
-      migrateLegacyAnchor(node);
-      node.classList.remove("redline-highlight", "redline-active", "coauthor-highlight", "coauthor-active");
+  for (const node of clone.querySelectorAll(".redline-highlight")) {
+    if (node.hasAttribute("data-redline-anchor")) {
+      node.classList.remove("redline-highlight", "redline-active");
       node.removeAttribute("data-thread-id");
     } else {
       node.replaceWith(...node.childNodes);
     }
   }
 
-  for (const node of clone.querySelectorAll("[data-redline-anchor], [data-coauthor-anchor]")) {
-    migrateLegacyAnchor(node);
-    node.classList.remove("redline-highlight", "redline-active", "coauthor-highlight", "coauthor-active");
+  for (const node of clone.querySelectorAll("[data-redline-anchor]")) {
+    node.classList.remove("redline-highlight", "redline-active");
     node.removeAttribute("data-thread-id");
   }
 
@@ -1002,10 +1007,9 @@ function cleanFrameHtml() {
   body?.removeAttribute("contenteditable");
   body?.removeAttribute("spellcheck");
   body?.classList.remove("redline-edit-mode");
-  body?.classList.remove("coauthor-edit-mode");
 
-  for (const element of clone.querySelectorAll(".redline-editable-text, .coauthor-editable-text")) {
-    element.classList.remove("redline-editable-text", "coauthor-editable-text");
+  for (const element of clone.querySelectorAll(".redline-editable-text")) {
+    element.classList.remove("redline-editable-text");
     element.removeAttribute("contenteditable");
     element.removeAttribute("spellcheck");
   }
@@ -1025,14 +1029,6 @@ function removeEmptyClassAttributes(root) {
   }
 }
 
-function migrateLegacyAnchor(element) {
-  const legacyAnchor = element.getAttribute("data-coauthor-anchor");
-  if (legacyAnchor && !element.hasAttribute("data-redline-anchor")) {
-    element.setAttribute("data-redline-anchor", legacyAnchor);
-  }
-  element.removeAttribute("data-coauthor-anchor");
-}
-
 function updateSelection({ showFab = false } = {}) {
   const doc = frame.contentDocument;
   const win = frame.contentWindow;
@@ -1048,7 +1044,7 @@ function updateSelection({ showFab = false } = {}) {
     if (selection?.isCollapsed) {
       const node = selection.anchorNode;
       const element = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
-      const highlight = element?.closest?.(".redline-highlight, .coauthor-highlight");
+      const highlight = element?.closest?.(".redline-highlight");
       const id = highlight?.getAttribute("data-thread-id");
       if (id) {
         if (id !== activeThreadId) selectThread(id, true);
@@ -1117,10 +1113,12 @@ function rangeIntersectsRoot(range, root) {
 function beginCommentFromSelection() {
   if (!pendingSelection) return false;
   if (!ensurePendingInlineAnchor()) {
-    showNotice(
-      "Selection changed",
-      "Select the text again before adding a comment.",
-    );
+    if (pendingSelection) {
+      showNotice(
+        "Selection changed",
+        "Select the text again before adding a comment.",
+      );
+    }
     return false;
   }
   openComposer();
@@ -1255,7 +1253,7 @@ function shouldFloatRailItems() {
 function anchorViewportMetric(threadId, doc) {
   const escapedThreadId = cssEscape(threadId);
   const anchors = doc.querySelectorAll(
-    `.redline-highlight[data-thread-id="${escapedThreadId}"], .coauthor-highlight[data-thread-id="${escapedThreadId}"]`,
+    `.redline-highlight[data-thread-id="${escapedThreadId}"]`,
   );
   let top = Infinity;
   let bottom = -Infinity;
@@ -1394,25 +1392,21 @@ function ensurePendingInlineAnchor() {
     };
     anchoredThreadIds.add(threadId);
     syncHighlightSelection();
-  } else {
-    // The selection can't be wrapped as one inline span (e.g. it crosses a block
-    // boundary). Create the thread span-less; the server anchors it by quote +
-    // occurrence — matching its own degrade-to-span-less behavior — instead of
-    // persisting invalid `<span><p>…</p></span>` markup.
-    const anchor = { ...pendingSelection.anchor };
-    delete anchor.anchorId;
-    pendingSelection.anchor = anchor;
+    return true;
   }
-  return true;
+
+  pendingSelection = null;
+  hideSelectionFab();
+  showSelectionAlert();
+  updateToolbar();
+  return false;
 }
 
 function removeInlineAnchorFromFrame(threadId) {
   const doc = frame.contentDocument;
   if (!doc) return;
   const anchorValue = attributeValue(threadId);
-  for (const element of doc.querySelectorAll(
-    `[data-redline-anchor="${anchorValue}"], [data-coauthor-anchor="${anchorValue}"]`,
-  )) {
+  for (const element of doc.querySelectorAll(`[data-redline-anchor="${anchorValue}"]`)) {
     unwrapElement(element);
   }
 }
@@ -1422,9 +1416,8 @@ function unwrapElement(element) {
 }
 
 function getStoredAuthorName() {
-  const stored = localStorage.getItem("redline.authorName") || localStorage.getItem("coauthor.authorName");
+  const stored = localStorage.getItem("redline.authorName");
   if (stored) {
-    localStorage.setItem("redline.authorName", stored);
     return stored;
   }
   return "User";
@@ -1729,7 +1722,7 @@ function handleFrameClick(event) {
 
   if (handleFrameHashLinkClick(event, target)) return;
 
-  const highlight = target.closest(".redline-highlight, .coauthor-highlight");
+  const highlight = target.closest(".redline-highlight");
   // Clicking the anchored text springs its card into place without scrolling
   // (you're already looking at the anchor). Clicking anywhere else in the
   // document drops the comment back to its resting, inactive state.
@@ -1857,9 +1850,7 @@ function removeThreadFromFrame(threadId) {
   const escapedThreadId = attributeValue(threadId);
   const selector = [
     `.redline-highlight[data-thread-id="${escapedThreadId}"]`,
-    `.coauthor-highlight[data-thread-id="${escapedThreadId}"]`,
     `[data-redline-anchor="${escapedThreadId}"]`,
-    `[data-coauthor-anchor="${escapedThreadId}"]`,
   ].join(",");
 
   for (const element of doc.querySelectorAll(selector)) {
@@ -1883,8 +1874,7 @@ function applyHighlights() {
     }
   }
 
-  for (const element of doc.body.querySelectorAll("[data-redline-anchor], [data-coauthor-anchor]")) {
-    migrateLegacyAnchor(element);
+  for (const element of doc.body.querySelectorAll("[data-redline-anchor]")) {
     const anchorId = element.getAttribute("data-redline-anchor");
     const thread = anchorId ? threadsByAnchor.get(anchorId) : null;
     if (!thread) continue;
@@ -1965,30 +1955,42 @@ function insertHighlightSpan(doc, domRange, threadId, { persistent = false } = {
   }
 }
 
-// A text-node walker that skips <script>/<style> content, so the browser's
-// anchoring text basis matches the server's (state.ts textContentForAnchoring,
-// which strips script/style). All three of collectAnchorText, anchorTextOffsetAt,
-// and locateTextOffset use this walker so the matching text, the producer offset,
-// and the offset->DOM mapping all agree.
-function makeAnchorTextWalker(root) {
-  const doc = root.ownerDocument;
-  return doc.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-    acceptNode(node) {
-      for (let el = node.parentNode; el && el !== root; el = el.parentNode) {
-        if (el.nodeName === "SCRIPT" || el.nodeName === "STYLE") {
-          return NodeFilter.FILTER_REJECT;
-        }
-      }
-      return NodeFilter.FILTER_ACCEPT;
-    },
-  });
+// A DOM segment stream that skips <script>/<style> content and inserts virtual
+// spaces around block elements. This mirrors state.ts textContentForAnchoring:
+// browser selections report whitespace between blocks, and quote matching needs
+// the same basis while DOM insertion still maps back to real text nodes.
+function makeAnchorTextSegments(root) {
+  const segments = [];
+  appendAnchorTextSegments(root, root, segments);
+  return segments;
+}
+
+function appendAnchorTextSegments(node, root, segments) {
+  if (node.nodeType === Node.TEXT_NODE) {
+    const text = node.nodeValue ?? "";
+    if (text) segments.push({ type: "text", node, text });
+    return;
+  }
+
+  if (node.nodeType !== Node.ELEMENT_NODE && node.nodeType !== Node.DOCUMENT_FRAGMENT_NODE) {
+    return;
+  }
+
+  const element = node.nodeType === Node.ELEMENT_NODE ? node : null;
+  if (element && element !== root && (element.nodeName === "SCRIPT" || element.nodeName === "STYLE")) {
+    return;
+  }
+
+  const block = element && element !== root && element.matches?.(BLOCK_LEVEL_SELECTOR);
+  if (block) segments.push({ type: "boundary", element, side: "start", text: " " });
+  for (const child of node.childNodes) appendAnchorTextSegments(child, root, segments);
+  if (block) segments.push({ type: "boundary", element, side: "end", text: " " });
 }
 
 function collectAnchorText(root) {
-  const walker = makeAnchorTextWalker(root);
-  let text = "";
-  while (walker.nextNode()) text += walker.currentNode.nodeValue;
-  return text;
+  return makeAnchorTextSegments(root)
+    .map((segment) => segment.text)
+    .join("");
 }
 
 // Length of the anchoring text before a DOM point (container, offset), handling
@@ -1998,41 +2000,56 @@ function anchorTextOffsetAt(root, container, offset) {
   const doc = root.ownerDocument;
   const point = doc.createRange();
   point.setStart(container, offset);
-  const walker = makeAnchorTextWalker(root);
   let total = 0;
 
-  while (walker.nextNode()) {
-    const node = walker.currentNode;
-    if (node === container) {
-      return total + Math.min(Math.max(offset, 0), node.nodeValue.length);
+  for (const segment of makeAnchorTextSegments(root)) {
+    if (segment.type === "text") {
+      const node = segment.node;
+      if (node === container) {
+        return total + Math.min(Math.max(offset, 0), node.nodeValue.length);
+      }
+      const nodeStart = anchorSegmentRange(doc, segment);
+      // If the point is at or before this node's start, it falls in the gap before
+      // this node — the accumulated length is the answer.
+      if (point.compareBoundaryPoints(Range.START_TO_START, nodeStart) <= 0) {
+        return total;
+      }
+      total += segment.text.length;
+      continue;
     }
-    const nodeStart = doc.createRange();
-    nodeStart.setStart(node, 0);
-    // If the point is at or before this node's start, it falls in the gap before
-    // this node — the accumulated length is the answer.
-    if (point.compareBoundaryPoints(Range.START_TO_START, nodeStart) <= 0) {
+
+    const boundary = anchorSegmentRange(doc, segment);
+    const relation = point.compareBoundaryPoints(Range.START_TO_START, boundary);
+    if (relation < 0 || (relation === 0 && segment.side === "start")) {
       return total;
     }
-    total += node.nodeValue.length;
+    total += segment.text.length;
   }
 
   return total;
 }
 
 function locateTextOffset(root, offset) {
-  const walker = makeAnchorTextWalker(root);
   let currentOffset = 0;
   let lastNode = null;
+  let lastPoint = null;
 
-  while (walker.nextNode()) {
-    const node = walker.currentNode;
-    lastNode = node;
-    const nextOffset = currentOffset + node.nodeValue.length;
-    if (offset <= nextOffset) {
-      return {
-        node,
-        offset: Math.max(0, offset - currentOffset),
-      };
+  for (const segment of makeAnchorTextSegments(root)) {
+    const nextOffset = currentOffset + segment.text.length;
+    if (segment.type === "text") {
+      const node = segment.node;
+      lastNode = node;
+      if (offset <= nextOffset) {
+        return {
+          node,
+          offset: Math.max(0, offset - currentOffset),
+        };
+      }
+    } else {
+      lastPoint = anchorSegmentPoint(root.ownerDocument, segment);
+      if (offset < nextOffset) {
+        return lastPoint;
+      }
     }
     currentOffset = nextOffset;
   }
@@ -2040,15 +2057,32 @@ function locateTextOffset(root, offset) {
   if (lastNode) {
     return { node: lastNode, offset: lastNode.nodeValue.length };
   }
+  if (lastPoint) return lastPoint;
   return null;
+}
+
+function anchorSegmentRange(doc, segment) {
+  const range = doc.createRange();
+  if (segment.type === "text") {
+    range.setStart(segment.node, 0);
+  } else if (segment.side === "start") {
+    range.setStartBefore(segment.element);
+  } else {
+    range.setStartAfter(segment.element);
+  }
+  return range;
+}
+
+function anchorSegmentPoint(doc, segment) {
+  const range = anchorSegmentRange(doc, segment);
+  return { node: range.startContainer, offset: range.startOffset };
 }
 
 function syncHighlightSelection() {
   const doc = frame.contentDocument;
   if (!doc) return;
-  for (const item of doc.querySelectorAll(".redline-highlight, .coauthor-highlight")) {
+  for (const item of doc.querySelectorAll(".redline-highlight")) {
     item.classList.toggle("redline-active", item.getAttribute("data-thread-id") === activeThreadId);
-    item.classList.toggle("coauthor-active", item.getAttribute("data-thread-id") === activeThreadId);
   }
 }
 
@@ -2056,7 +2090,7 @@ function scrollToThreadAnchor(threadId) {
   const doc = frame.contentDocument;
   const escapedThreadId = cssEscape(threadId);
   const anchor = doc?.querySelector(
-    `.redline-highlight[data-thread-id="${escapedThreadId}"], .coauthor-highlight[data-thread-id="${escapedThreadId}"]`,
+    `.redline-highlight[data-thread-id="${escapedThreadId}"]`,
   );
   if (!anchor) return false;
 
@@ -2105,6 +2139,17 @@ function showNotice(title, body) {
 
 function hideNotice() {
   notice.hidden = true;
+}
+
+function showSelectionAlert() {
+  selectionAlert.hidden = false;
+  requestAnimationFrame(() => {
+    selectionAlertClose.focus({ preventScroll: true });
+  });
+}
+
+function hideSelectionAlert() {
+  selectionAlert.hidden = true;
 }
 
 async function readJsonPayload(response) {

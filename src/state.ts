@@ -10,6 +10,9 @@ interface HtmlTextRange {
   end: number;
 }
 
+const crossBlockCommentMessage =
+  "Comments cannot span block boundaries yet. Select text within one paragraph, table cell, or list item.";
+
 export interface CommentAnchor {
   type: "text-range" | "document";
   anchorId?: string;
@@ -51,7 +54,6 @@ export interface ReviewSummary {
 
 export interface DocumentState {
   documentPath: string;
-  legacySidecarPath: string;
   html: string;
   version: string;
   updatedAt: string;
@@ -68,7 +70,6 @@ export interface DocumentState {
 
 export interface CommentState {
   documentPath: string;
-  legacySidecarPath: string;
   version: string;
   updatedAt: string;
   threads: CommentThread[];
@@ -93,7 +94,6 @@ export interface AgentCommentIndexThread {
 
 export interface AgentCommentIndexState {
   documentPath: string;
-  legacySidecarPath: string;
   version: string;
   updatedAt: string;
   threads: AgentCommentIndexThread[];
@@ -102,7 +102,6 @@ export interface AgentCommentIndexState {
 
 export interface AgentCommentThreadState {
   documentPath: string;
-  legacySidecarPath: string;
   version: string;
   updatedAt: string;
   thread: CommentThread;
@@ -111,7 +110,6 @@ export interface AgentCommentThreadState {
 
 export interface DocumentFileState {
   documentPath: string;
-  legacySidecarPath: string;
   version: string;
   updatedAt: string;
   summary: ReviewSummary;
@@ -149,10 +147,8 @@ const agentGuideComment =
   "<!-- redline-agent-guide: use the redline-review skill; comments live in #redline-state and data-redline-anchor spans. -->";
 const embeddedStateScriptPattern =
   /<script\b(?=[^>]*\bid\s*=\s*(["'])redline-state\1)(?=[^>]*\btype\s*=\s*(["'])application\/json\2)[^>]*>[\s\S]*?<\/script>\s*/i;
-const legacyEmbeddedStateScriptPattern =
-  /<script\b(?=[^>]*\bid\s*=\s*(["'])coauthor-state\1)(?=[^>]*\btype\s*=\s*(["'])application\/json\2)[^>]*>[\s\S]*?<\/script>\s*/i;
 const embeddedStateScriptRemovalPattern =
-  /[ \t]*<script\b(?=[^>]*\bid\s*=\s*(["'])(?:redline-state|coauthor-state)\1)(?=[^>]*\btype\s*=\s*(["'])application\/json\2)[^>]*>[\s\S]*?<\/script>[ \t]*(?:\r?\n)?/gi;
+  /[ \t]*<script\b(?=[^>]*\bid\s*=\s*(["'])redline-state\1)(?=[^>]*\btype\s*=\s*(["'])application\/json\2)[^>]*>[\s\S]*?<\/script>[ \t]*(?:\r?\n)?/gi;
 const agentGuideMetaPattern =
   /<meta\b(?=[^>]*\bname\s*=\s*(["'])redline-agent-guide\1)[^>]*>/i;
 const agentGuideCommentPattern = /<!--\s*redline-agent-guide:/i;
@@ -168,7 +164,6 @@ export function defaultDocumentPath(cwd = process.cwd()): string {
 export function emptyDocumentState(howtoPath?: string): DocumentState {
   return {
     documentPath: "",
-    legacySidecarPath: "",
     html: "",
     version: "",
     updatedAt: emptyReviewUpdatedAt,
@@ -182,14 +177,6 @@ export function emptyDocumentState(howtoPath?: string): DocumentState {
 export function resolveDocumentPath(input?: string, cwd = process.cwd()): string {
   const candidate = input && input.trim().length > 0 ? input : defaultDocumentPath(cwd);
   return path.resolve(cwd, candidate);
-}
-
-export function sidecarPathFor(documentPath: string): string {
-  return `${documentPath}.redline.json`;
-}
-
-export function legacySidecarPathFor(documentPath: string): string {
-  return `${documentPath}.coauthor.json`;
 }
 
 export function ensureDocument(documentPath: string): void {
@@ -217,7 +204,6 @@ export function readDocumentState(documentPath: string): DocumentState {
   const reviewState = readReviewState(absoluteDocumentPath, html);
   return {
     documentPath: absoluteDocumentPath,
-    legacySidecarPath: legacySidecarPathFor(absoluteDocumentPath),
     html,
     version: versionFor(html),
     updatedAt: reviewState.updatedAt,
@@ -230,7 +216,6 @@ export function readCommentState(documentPath: string): CommentState {
   const state = readDocumentState(documentPath);
   return {
     documentPath: state.documentPath,
-    legacySidecarPath: state.legacySidecarPath,
     version: state.version,
     updatedAt: state.updatedAt,
     threads: state.threads,
@@ -262,7 +247,6 @@ export function readAgentCommentIndexState(
 
   return {
     documentPath: state.documentPath,
-    legacySidecarPath: state.legacySidecarPath,
     version: state.version,
     updatedAt: state.updatedAt,
     threads,
@@ -282,7 +266,6 @@ export function readAgentCommentThreadState(
 
   return {
     documentPath: state.documentPath,
-    legacySidecarPath: state.legacySidecarPath,
     version: state.version,
     updatedAt: state.updatedAt,
     thread,
@@ -294,7 +277,6 @@ export function readDocumentFileState(documentPath: string): DocumentFileState {
   const state = readDocumentState(documentPath);
   return {
     documentPath: state.documentPath,
-    legacySidecarPath: state.legacySidecarPath,
     version: state.version,
     updatedAt: state.updatedAt,
     summary: state.summary,
@@ -542,33 +524,6 @@ export function repairDocumentAnchors(documentPath: string): DocumentState {
   return readDocumentState(absoluteDocumentPath);
 }
 
-export function readSidecar(documentPath: string): EmbeddedCommentState {
-  const absoluteDocumentPath = path.resolve(documentPath);
-  const sidecarPath = fs.existsSync(sidecarPathFor(absoluteDocumentPath))
-    ? sidecarPathFor(absoluteDocumentPath)
-    : legacySidecarPathFor(absoluteDocumentPath);
-  if (!fs.existsSync(sidecarPath)) {
-    return emptyReviewState();
-  }
-
-  const parsed = JSON.parse(fs.readFileSync(sidecarPath, "utf8")) as Partial<EmbeddedCommentState>;
-  return {
-    schemaVersion,
-    updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : emptyReviewUpdatedAt,
-    threads: Array.isArray(parsed.threads) ? parsed.threads.map(normalizeThread) : [],
-  };
-}
-
-export function writeSidecar(documentPath: string, sidecar: EmbeddedCommentState): void {
-  const absoluteDocumentPath = path.resolve(documentPath);
-  const normalized: EmbeddedCommentState = {
-    schemaVersion,
-    updatedAt: sidecar.updatedAt || new Date().toISOString(),
-    threads: sidecar.threads.map(normalizeThread),
-  };
-  writeFileAtomic(sidecarPathFor(absoluteDocumentPath), `${JSON.stringify(normalized, null, 2)}\n`);
-}
-
 export function summarize(threads: CommentThread[]): ReviewSummary {
   return {
     threads: threads.length,
@@ -610,11 +565,11 @@ function readDocumentHtml(documentPath: string): string {
 function readReviewState(documentPath: string, html: string): EmbeddedCommentState {
   const embedded = extractEmbeddedReviewState(html);
   if (embedded) return embedded;
-  return readSidecar(documentPath);
+  return emptyReviewState();
 }
 
 function extractEmbeddedReviewState(html: string): EmbeddedCommentState | null {
-  const match = html.match(embeddedStateScriptPattern) ?? html.match(legacyEmbeddedStateScriptPattern);
+  const match = html.match(embeddedStateScriptPattern);
   if (!match?.[0]) return null;
 
   const jsonText = match[0]
@@ -642,8 +597,6 @@ function writeHtmlWithReviewState(
     threads: repaired.threads.map(normalizeThread),
   };
   writeFileAtomic(absoluteDocumentPath, injectEmbeddedReviewState(normalizeReviewHtml(repaired.html), normalized));
-  fs.rmSync(sidecarPathFor(absoluteDocumentPath), { force: true });
-  fs.rmSync(legacySidecarPathFor(absoluteDocumentPath), { force: true });
 }
 
 function injectEmbeddedReviewState(html: string, reviewState: EmbeddedCommentState): string {
@@ -666,7 +619,7 @@ function injectEmbeddedReviewState(html: string, reviewState: EmbeddedCommentSta
 }
 
 function normalizeReviewHtml(html: string): string {
-  return ensureAgentDiscoveryMarker(html.replace(/\bdata-coauthor-anchor=/gi, "data-redline-anchor="));
+  return ensureAgentDiscoveryMarker(html);
 }
 
 function ensureAgentDiscoveryMarker(html: string): string {
@@ -726,11 +679,11 @@ function prepareCommentAnchor(
     return { anchor, html };
   }
 
-  // The quote resolved to a location, but it can't be wrapped in a span (e.g. it
-  // spans a block boundary). Keep the thread span-less rather than reject it: the
-  // browser still re-anchors by quote + occurrence at render time.
   const htmlWithAnchor = insertInlineAnchor(html, anchorId, located.range);
   if (!htmlWithAnchor) {
+    if (options.requireInlineAnchor) {
+      throw new Error(crossBlockCommentMessage);
+    }
     return { anchor, html };
   }
 
@@ -800,26 +753,21 @@ function replaceThreadAnchor(
 }
 
 function hasInlineAnchor(html: string, anchorId: string): boolean {
-  return inlineAnchorPattern(anchorId).some((pattern) => pattern.test(html));
+  return inlineAnchorPattern(anchorId).test(html);
 }
 
 function removeInlineAnchors(html: string, anchorIds: string[]): string {
   let nextHtml = html;
   for (const anchorId of anchorIds) {
-    for (const pattern of inlineAnchorPattern(anchorId)) {
-      nextHtml = nextHtml.replace(pattern, "$3");
-    }
+    nextHtml = nextHtml.replace(inlineAnchorPattern(anchorId), "$3");
   }
   return nextHtml;
 }
 
-function inlineAnchorPattern(anchorId: string): RegExp[] {
-  return ["redline", "coauthor"].map(
-    (name) =>
-      new RegExp(
-        `<span\\b(?=[^>]*\\bdata-${name}-anchor\\s*=\\s*(["'])${escapeRegExp(anchorId)}\\1)([^>]*)>([\\s\\S]*?)<\\/span>`,
-        "gi",
-      ),
+function inlineAnchorPattern(anchorId: string): RegExp {
+  return new RegExp(
+    `<span\\b(?=[^>]*\\bdata-redline-anchor\\s*=\\s*(["'])${escapeRegExp(anchorId)}\\1)([^>]*)>([\\s\\S]*?)<\\/span>`,
+    "gi",
   );
 }
 
@@ -871,8 +819,8 @@ function insertInlineAnchor(html: string, anchorId: string, range: HtmlTextRange
   const inner = html.slice(indices.start, indices.end);
   // A span may only wrap a tag-balanced slice. A normalized quote can match
   // across element boundaries (e.g. "Hello world" over `<p>Hello</p><p>world</p>`),
-  // and wrapping that would emit crossed, invalid markup. Bail so the caller can
-  // keep the thread span-less instead.
+  // and wrapping that would emit crossed, invalid markup. Bail so new comment
+  // creation can reject it cleanly.
   if (!spanWrapIsSafe(inner)) return null;
 
   const open = `<span data-redline-anchor="${anchorId}">`;
@@ -908,16 +856,12 @@ function spanWrapIsSafe(htmlSlice: string): boolean {
 }
 
 function renameInlineAnchor(html: string, fromAnchorId: string, toAnchorId: string): string {
-  let nextHtml = html;
-  for (const pattern of inlineAnchorPattern(fromAnchorId)) {
-    nextHtml = nextHtml.replace(pattern, (match) =>
-      match.replace(
-        /\bdata-(?:redline|coauthor)-anchor\s*=\s*(["'])([^"']+)\1/i,
-        `data-redline-anchor=$1${toAnchorId}$1`,
-      ),
-    );
-  }
-  return nextHtml;
+  return html.replace(inlineAnchorPattern(fromAnchorId), (match) =>
+    match.replace(
+      /\bdata-redline-anchor\s*=\s*(["'])([^"']+)\1/i,
+      `data-redline-anchor=$1${toAnchorId}$1`,
+    ),
+  );
 }
 
 function htmlIndicesForTextRange(html: string, range: HtmlTextRange): HtmlTextRange | null {
@@ -928,20 +872,16 @@ function htmlIndicesForTextRange(html: string, range: HtmlTextRange): HtmlTextRa
   let index = bounds.start;
 
   while (index < bounds.end) {
-    const skipped = skippableHtmlEnd(html, index, bounds.end);
-    if (skipped !== null) {
-      index = skipped;
-      continue;
-    }
-
-    const token = readTextToken(html, index, bounds.end);
+    const token = readAnchorTextToken(html, index, bounds.end);
     const nextTextOffset = textOffset + token.text.length;
-    if (htmlStart === null && range.start >= textOffset && range.start < nextTextOffset) {
-      htmlStart = htmlIndexWithinTextToken(token, range.start - textOffset);
-    }
-    if (htmlEnd === null && range.end > textOffset && range.end <= nextTextOffset) {
-      htmlEnd = htmlIndexWithinTextToken(token, range.end - textOffset);
-      break;
+    if (token.text.length > 0) {
+      if (htmlStart === null && range.start >= textOffset && range.start < nextTextOffset) {
+        htmlStart = htmlIndexWithinAnchorTextToken(token, range.start - textOffset);
+      }
+      if (htmlEnd === null && range.end > textOffset && range.end <= nextTextOffset) {
+        htmlEnd = htmlIndexWithinAnchorTextToken(token, range.end - textOffset);
+        break;
+      }
     }
 
     textOffset = nextTextOffset;
@@ -958,13 +898,7 @@ function textContentForAnchoring(html: string): string {
   let index = bounds.start;
 
   while (index < bounds.end) {
-    const skipped = skippableHtmlEnd(html, index, bounds.end);
-    if (skipped !== null) {
-      index = skipped;
-      continue;
-    }
-
-    const token = readTextToken(html, index, bounds.end);
+    const token = readAnchorTextToken(html, index, bounds.end);
     text += token.text;
     index = token.end;
   }
@@ -986,24 +920,55 @@ function bodyContentBounds(html: string): HtmlTextRange {
   };
 }
 
-function skippableHtmlEnd(html: string, index: number, limit: number): number | null {
+const blockBoundaryHtmlElements = new Set([
+  "address", "article", "aside", "blockquote", "details", "dd", "div", "dl",
+  "dt", "fieldset", "figcaption", "figure", "footer", "form", "h1", "h2",
+  "h3", "h4", "h5", "h6", "header", "hgroup", "hr", "li", "main", "nav",
+  "ol", "p", "pre", "section", "table", "tbody", "td", "tfoot", "th",
+  "thead", "tr", "ul",
+]);
+
+type AnchorTextToken = {
+  start: number;
+  end: number;
+  text: string;
+  synthetic?: boolean;
+  htmlIndex?: number;
+};
+
+function readAnchorTextToken(html: string, index: number, limit: number): AnchorTextToken {
   if (html.startsWith("<!--", index)) {
     const end = html.indexOf("-->", index + 4);
-    return end === -1 ? limit : Math.min(limit, end + 3);
+    return { start: index, end: end === -1 ? limit : Math.min(limit, end + 3), text: "" };
   }
 
-  if (html[index] !== "<") return null;
+  if (html[index] !== "<") return readTextToken(html, index, limit);
 
   const tagEnd = tagEndIndex(html, index, limit);
   const tagText = html.slice(index, tagEnd);
   const tagName = tagText.match(/^<\/?\s*([A-Za-z][\w:-]*)/)?.[1]?.toLowerCase();
-  if (tagName === "script" || tagName === "style") {
+  const isClosing = /^<\s*\//.test(tagText);
+  if (!isClosing && (tagName === "script" || tagName === "style")) {
     const closePattern = new RegExp(`<\\/${tagName}\\s*>`, "i");
     const closeMatch = closePattern.exec(html.slice(tagEnd, limit));
-    return closeMatch ? Math.min(limit, tagEnd + closeMatch.index + closeMatch[0].length) : limit;
+    return {
+      start: index,
+      end: closeMatch ? Math.min(limit, tagEnd + closeMatch.index + closeMatch[0].length) : limit,
+      text: "",
+    };
   }
 
-  return tagEnd;
+  if (tagName && blockBoundaryHtmlElements.has(tagName)) {
+    return {
+      start: index,
+      end: tagEnd,
+      text: " ",
+      synthetic: true,
+      htmlIndex: isClosing ? index : tagEnd,
+    };
+  }
+
+  return { start: index, end: tagEnd, text: "" };
 }
 
 function tagEndIndex(html: string, start: number, limit: number): number {
@@ -1035,6 +1000,11 @@ function readTextToken(html: string, index: number, limit: number): { start: num
   }
 
   return { start: index, end: index + 1, text: html[index] ?? "" };
+}
+
+function htmlIndexWithinAnchorTextToken(token: AnchorTextToken, textOffset: number): number {
+  if (token.synthetic) return token.htmlIndex ?? token.end;
+  return htmlIndexWithinTextToken(token, textOffset);
 }
 
 function htmlIndexWithinTextToken(

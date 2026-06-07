@@ -97,7 +97,7 @@ A thread highlights in two ways, and you can rely on either:
 - **Persisted span.** If the HTML contains `<span data-redline-anchor="thread_id">…</span>`, the highlight is durable: it survives edits that move surrounding text, because the location is stored in the file.
 - **Quote match.** If there is no span, the browser re-anchors at render time by matching `anchor.quote` against the document text (whitespace-collapsed, case-insensitive). When the quote appears more than once, `anchor.occurrence` (1-based, in document order) selects which instance. The highlight appears in the browser but is *not* written back to the file.
 
-A text-range anchor has exactly two locating fields: `anchor.quote` and an optional `anchor.occurrence`. The comment helpers (`comment`, `apply`, `POST /api/comments`) resolve the quote (plus occurrence) and insert a durable `data-redline-anchor` span. If the quote cannot be resolved to a single location — not found, or repeated with no `occurrence` — the helper **rejects** the command rather than creating a span-less thread. Hand-wrap a span yourself only when the target is inherently unquotable.
+A text-range anchor has exactly two locating fields: `anchor.quote` and an optional `anchor.occurrence`. The comment helpers (`comment`, `apply`, `POST /api/comments`) resolve the quote (plus occurrence) and insert a durable `data-redline-anchor` span. If the quote cannot be resolved to a single location — not found, repeated with no `occurrence`, or matched only across block boundaries that cannot be wrapped as one valid inline span — the helper **rejects** the command rather than creating a span-less thread. Choose a smaller selection within one paragraph, table cell, or list item.
 
 ### Hidden anchor edge cases
 
