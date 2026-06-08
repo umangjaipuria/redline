@@ -83,7 +83,7 @@ bun run start documents/howto.html   # start the review server; prints a localho
 | Command | What it does |
 | --- | --- |
 | `bun run build:client` | Bundle the Preact client (`src/client`) to `dist/`. `dist/` is gitignored, so run this once after cloning and again whenever you change client code. |
-| `bun run start [file] [--port N] [--host H] [--new]` | Start the server. With a file it opens that document; with none, the browser prompts you to pick one. **If a Redline server is already running, the file is opened on that server** (one shared server holds many documents) and its URL is printed — pass `--new` for a separate server, or `--port N` for one on another port. Binds to `127.0.0.1` by default; binding elsewhere needs `REDLINE_ALLOW_REMOTE=1` because the local API is unauthenticated. |
+| `bun run start [file] [--port N] [--host H]` | Start the server. With a file it opens that document; with none, the browser prompts you to pick one. **If a Redline server is already running, the file is opened on that server** (one shared server holds many documents) and its URL is printed — pass `--port N` to run a separate server on another port instead. Binds to `127.0.0.1` by default; binding elsewhere needs `REDLINE_ALLOW_REMOTE=1` because the local API is unauthenticated. |
 | `bun run dev` | Start the server with `--watch` (auto-restart on server-code changes). The client bundle is not watched — re-run `build:client` after client edits. |
 | `bun src/agent/cli.ts <command>` | The `redline` CLI (see [How agents talk to Redline](#how-agents-talk-to-redline)). Run `bun link` once to expose it globally as `redline`. |
 | `bun test` | Run the test suite. |

@@ -483,22 +483,21 @@ export interface ServerOptions {
   documentPath?: string; // optional file to open at startup
   host: string;
   port: number;
-  portExplicit?: boolean; // user passed --port — keep this instance distinct
-  forceNew?: boolean; // user passed --new — always start a fresh server
+  portExplicit?: boolean; // user passed --port — start a distinct instance there
 }
 
 // Redline runs one shared server holding many documents. When `start <file>` is
 // run and a server is ALREADY running, reuse it: open the file on it and return
 // the URL to print, rather than binding a second server. Returns null to start
 // fresh. Reuse is skipped when no file is given (a bare `start`/`dev` always
-// boots its own server), when --port pins a specific instance, or with --new.
-// The candidate server's /api/health is probed first so a stale registry entry
-// (pid alive but not actually serving) doesn't misroute the open.
+// boots its own server) or when --port pins a specific instance (use that to run
+// a separate server). The candidate server's /api/health is probed first so a
+// stale registry entry (pid alive but not actually serving) doesn't misroute.
 export async function reuseRunningServer(
   options: ServerOptions,
   deps: { serversDir?: string; fetchImpl?: typeof fetch } = {},
 ): Promise<string | null> {
-  if (!options.documentPath || options.portExplicit || options.forceNew) return null;
+  if (!options.documentPath || options.portExplicit) return null;
   const serversDir = deps.serversDir ?? SERVERS_DIR;
   const fetchImpl = deps.fetchImpl ?? fetch;
 
@@ -517,7 +516,7 @@ export async function reuseRunningServer(
       return (
         `Redline is already running (pid ${record.pid}); opened ${options.documentPath} on it.\n` +
         `${url}\n` +
-        `(Use --new to start a separate server, or --port N for one on another port.)`
+        `(Pass --port N to run a separate server on another port instead.)`
       );
     } catch {
       // Unreachable or errored — try the next registered server.
@@ -637,23 +636,21 @@ function parseArgs(args: string[]): ServerOptions {
   let host = "127.0.0.1";
   let port = 7331;
   let portExplicit = false;
-  let forceNew = false;
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
     if (!arg) continue;
     if (arg === "-h" || arg === "--help") {
       console.log(
         [
-          "Usage: bun run start [document.html] [--port 7331] [--host 127.0.0.1] [--new]",
+          "Usage: bun run start [document.html] [--port 7331] [--host 127.0.0.1]",
           "",
           "With a file, opens it for review and prints a localhost URL. If a Redline",
           "server is already running, the file is opened on THAT server (one shared",
-          "server holds many documents) unless you pass --new or --port.",
+          "server holds many documents); pass --port to run a separate server instead.",
         ].join("\n"),
       );
       process.exit(0);
     }
-    if (arg === "--new") { forceNew = true; continue; }
     if (arg === "--host") { host = args[++i] ?? host; continue; }
     if (arg === "--port" || arg === "-p") { port = parsePort(args[++i]); portExplicit = true; continue; }
     if (arg.startsWith("--port=")) { port = parsePort(arg.slice(7)); portExplicit = true; continue; }
@@ -661,7 +658,7 @@ function parseArgs(args: string[]): ServerOptions {
     if (arg.startsWith("-")) throw new Error(`Unknown flag: ${arg}`);
     documentPath = expandPath(arg);
   }
-  return { documentPath, host, port, portExplicit, forceNew };
+  return { documentPath, host, port, portExplicit };
 }
 
 function parsePort(value: string | undefined): number {

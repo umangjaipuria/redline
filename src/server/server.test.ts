@@ -343,12 +343,11 @@ describe("reuseRunningServer (start reuses a running server)", () => {
     expect(list.docs).toHaveLength(1);
   });
 
-  test("returns null (start fresh) with --new, --port, or no file", async () => {
+  test("returns null (start fresh) with --port or no file", async () => {
     const serversDir = path.join(dir, "servers");
     registerSelf(serversDir);
     const fetchImpl = fakeFetchTo(handler);
     const base = { documentPath: file, host: "127.0.0.1", port: 7331 };
-    expect(await reuseRunningServer({ ...base, forceNew: true }, { serversDir, fetchImpl })).toBeNull();
     expect(await reuseRunningServer({ ...base, portExplicit: true }, { serversDir, fetchImpl })).toBeNull();
     expect(await reuseRunningServer({ host: "127.0.0.1", port: 7331 }, { serversDir, fetchImpl })).toBeNull();
   });
