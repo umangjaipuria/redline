@@ -1,259 +1,133 @@
 ---
 name: redline-review
-description: Work with Redline for reviewing AI-authored HTML documents. Use when the user asks to use Redline, asks an agent to review or revise a document it wrote, needs browser-visible comments, replies, reply deletes, or resolves, or when reading, preserving, adding, replying to, resolving, or acting on Redline comments with inline data-redline-anchor spans and embedded thread state.
+description: Work with Redline for reviewing AI-authored documents (HTML first). Use when the user asks to use Redline, asks an agent to review or revise a document it wrote, needs browser-visible comments, replies, reply deletes, or thread deletes, or when reading, adding, replying to, deleting, or re-anchoring Redline comments. Review state lives in one embedded #redline-state block; there are no inline anchor spans.
 ---
 
 # Redline Review
 
-Redline documents are ordinary HTML files with open review state embedded inside the file. Treat comments as user-authored review data and preserve them while editing.
+Redline documents are ordinary files (HTML in this version) with open review state embedded inside the file, in a single block. Redline is a **reviewing-and-commenting** tool, not the document owner: you (the agent) own and edit the content directly; Redline only reads content and writes the comment state block. Treat comments as user-authored review data.
+
+Two things matter most:
+
+- **State lives in one block.** HTML files carry a `<script type="application/json" id="redline-state">…</script>` in `<head>`. There are **no** inline `data-redline-anchor` spans anymore — highlights are rendered at view time, not persisted. The only bytes Redline writes are that block plus a one-line discovery marker.
+- **The file path is the durable identity.** A document is addressed over the API by an ephemeral `docId` that changes across server restarts. Always resolve path → docId each time; never cache a docId across sessions.
 
 ## When To Use
 
 Use this skill when:
 
-- The user asks to use Redline.
-- The user asks an agent to review, revise, or respond to feedback on an HTML document the agent wrote.
-- The task involves browser-visible comments, replies, reply deletes, resolves, or review threads on HTML.
-- An HTML file already contains Redline state:
+- The user asks to use Redline, or to review/revise/respond to feedback on a document the agent wrote.
+- A file contains Redline state: `<script type="application/json" id="redline-state">…</script>`, or a discovery marker `<meta name="redline-agent-guide" content="…">`.
 
-```html
-<script type="application/json" id="redline-state">...</script>
-```
+A running server registers itself under `~/.local/state/redline/servers/<pid>.json`, containing `url`, `pid`, `startedAt`, and `docs` (an array of `{ docId, path }`). This is a fixed per-user path, found regardless of working directory. The CLI uses it automatically; you rarely read it by hand. Ignore entries whose `pid` is no longer alive.
 
-or:
+The CLI is `redline`. In this repo during development, run it with `bun src/agent/cli.ts <command>`. Every file-path command auto-discovers a running server that has the file open and routes through it (so the browser updates live); otherwise it operates on the file directly. You always pass the **file path** — the CLI resolves it to a docId for you.
 
-```html
-<span data-redline-anchor="thread_abc123">reviewed text</span>
-```
+## How Anchoring Works Now
 
-or an agent guide marker:
+Each comment stores an anchor as **redundant selectors**, captured over the document's canonical text (rendered text, tags stripped):
 
-```html
-<meta name="redline-agent-guide" content="...">
-```
+- `quote` — the exact selected text
+- `prefix` / `suffix` — ~32 chars of surrounding context
+- `posStart` / `posEnd` — approximate character offsets (hints only)
 
-If a local server is running, look in `~/.local/state/redline/servers/`. Each running server writes one `<pid>.json` file there containing `url`, `documentPath`, `pid`, and `startedAt`. This is a fixed per-user path, so any agent finds it regardless of its working directory. Pick the entry whose `documentPath` matches the file you are reviewing; if only one is present, use it. Ignore any entry whose `pid` is no longer alive (servers delete their file on a clean exit, but a hard kill can leave a stale one). The file is rewritten in place when that server switches documents, so `documentPath` always reflects what it is currently serving.
+Redline resolves anchors **fresh** against the current text on every load/render, with a fuzzy fallback cascade, and classifies each as:
+
+- **anchored** — confident match; highlighted normally.
+- **needs-review** — low-confidence fuzzy match; shown but flagged.
+- **orphaned** — no good match; kept in the thread list, never deleted.
+
+You do **not** maintain anchors by hand. Edit the content directly; Redline re-resolves automatically. You only intervene for what it can't resolve (orphaned / needs-review), using `reanchor`.
 
 ## Read Feedback
 
-Prefer the compact comments helper when available:
+Compact thread list (id, anchor quote, resolution state, author, last message):
 
 ```bash
-bun src/agent.ts comments <document.html>
+redline comments <file>
 ```
 
-With a running server, read the lightweight comments index without loading the full HTML:
-
-```text
-GET /api/agent/comments/index?since=<ISO timestamp>
-```
-
-`since` is optional. When present, it returns only threads where at least one comment was created at or after that timestamp. The returned state includes document metadata, `summary`, and matching threads, but not `html`. Each index thread has its current metadata, a `comments` array with only `author` and `createdAt`, and `lastCommentBody`.
-
-To read full content for one thread:
-
-```text
-GET /api/agent/comments/<thread-id>
-```
-
-The full thread response includes that thread's complete `messages` array. Message ids are durable; the first message is the original comment, and later messages are replies.
-
-When an agent needs to inspect or edit the document content, get the current file path and read the file from disk:
+Anchor resolution report — each thread's state (anchored / needs-review / orphaned), resolved range, and stored quote/context. This is the reconcile report:
 
 ```bash
-bun src/agent.ts file <document.html>
+redline anchors <file> [--in START:END]
 ```
 
-With a running server:
-
-```text
-GET /api/agent/file
-```
-
-`file` returns the current `documentPath`, version, update time, and summary without returning HTML. `state` and `GET /api/agent/state` remain available for compatibility and full-document workflows, but avoid them for comment-only work because large HTML can waste context.
-
-## Preserve Anchors
-
-Inline anchors are the durable location of a comment:
-
-```html
-<span data-redline-anchor="thread_abc123">reviewed text</span>
-```
-
-Rules:
-
-- Redline stamps opened documents with `<meta name="redline-agent-guide" ...>` or a `redline-agent-guide` HTML comment so agents can discover this workflow from the file alone.
-- Do not delete a `data-redline-anchor` span unless explicitly resolving that thread.
-- When rewriting anchored text, preserve or move the span so it still wraps the relevant revised text.
-- Keep `thread.id`, `thread.anchor.anchorId`, and `data-redline-anchor` aligned when possible.
-- Do not add runtime classes such as `redline-highlight`; the app adds those while rendering.
-- If an anchor disappears, Redline may fall back to quote matching, but the thread should remain open until resolved.
-- When you rewrite anchored text, move the anchor with it (see [When threads orphan](#when-threads-orphan-and-how-to-avoid-it)). Otherwise the thread orphans.
-
-### How anchoring resolves in the browser
-
-A thread highlights in two ways, and you can rely on either:
-
-- **Persisted span.** If the HTML contains `<span data-redline-anchor="thread_id">…</span>`, the highlight is durable: it survives edits that move surrounding text, because the location is stored in the file.
-- **Quote match.** If there is no span, the browser re-anchors at render time by matching `anchor.quote` against the document text (whitespace-collapsed, case-insensitive). When the quote appears more than once, `anchor.occurrence` (1-based, in document order) selects which instance. The highlight appears in the browser but is *not* written back to the file.
-
-A text-range anchor has exactly two locating fields: `anchor.quote` and an optional `anchor.occurrence`. The comment helpers (`comment`, `apply`, `POST /api/comments`) resolve the quote (plus occurrence) and insert a durable `data-redline-anchor` span. If the quote cannot be resolved to a single location — not found, repeated with no `occurrence`, or matched only across block boundaries that cannot be wrapped as one valid inline span — the helper **rejects** the command rather than creating a span-less thread. Choose a smaller selection within one paragraph, table cell, or list item.
-
-### Hidden anchor edge cases
-
-Anchors can live inside native HTML disclosure widgets such as closed `<details>` blocks. In the browser, selecting the thread should temporarily open any closed ancestor `<details>` before scrolling to the anchor; that runtime-opened state is removed before saving so the source document does not gain an unintended `open` attribute.
-
-If a user reports a missing anchor, inspect the HTML for the thread's `data-redline-anchor` first. If the span exists inside a closed `<details>`, the comment is still anchored; the browser just needs to reveal the disclosure. Redline can do this generically for native `<details>`, but not for arbitrary custom accordions, `display:none` regions, or JavaScript-driven panels with document scripts disabled. For those custom hiding patterns, keep the anchor span intact and explain that the document needs a manual or document-specific reveal path.
-
-### When threads orphan (and how to avoid it)
-
-A thread is *orphaned* when Redline can locate it by **neither** its `data-redline-anchor` span **nor** quote matching. In the browser it shows an amber "Orphaned · kept until you resolve it" header and floats free of the document text. This is deliberate: orphaned threads are kept, never auto-deleted, so review feedback is not silently lost. But a floating thread is harder to act on, so avoid creating one.
-
-A thread orphans when you revise the anchored text and the anchor no longer points at it:
-
-- the `data-redline-anchor` span was removed or unwrapped, **and**
-- quote matching fails because the rewrite changed the text so it no longer matches `anchor.quote` (or `anchor.occurrence` now points at a different instance).
-
-When you rewrite anchored text, update the anchor along with the text. In order of preference:
-
-1. **Move the span (most durable).** Keep the `data-redline-anchor` span wrapped around the revised text. The span's location is persisted in the file, so it survives any rewording and the thread stays anchored regardless of quote drift. Prefer this whenever a span exists or can be added.
-2. **Update the quote (span-less threads).** If the thread relies on quote matching only, edit the thread's `anchor.quote` and top-level `quote` in `#redline-state` to the new text, and update `anchor.occurrence` if the new text repeats. A stale quote is the most common cause of orphaning.
-3. **Subject removed entirely.** If the text the comment referred to is gone, reply explaining the change and `resolve` the thread if the feedback is addressed; otherwise leave it open and orphaned for the human to decide.
-
-Do not "fix" an orphaned thread by deleting it unless you are resolving the underlying feedback.
-
-### Thread and anchor ids
-
-Thread ids and `anchorId` values must match `^thread_[A-Za-z0-9_-]{1,128}$` — they must start with `thread_`. The CLI validates explicit ids. Lower-level state/API paths normalize invalid ids, which can break alignment with a span you wrote by hand. Always prefix your ids with `thread_`.
-
-## Comments, Replies, Resolves, And Deletes
-
-Reply after making a relevant change:
+One thread in full:
 
 ```bash
-bun src/agent.ts reply <document.html> <thread-id> "I revised this section." --author Claude
+redline thread <file> <thread-id>
 ```
 
-Delete one reply, and only that reply, by message id:
+Document metadata only (no content):
 
 ```bash
-bun src/agent.ts delete-reply <document.html> <thread-id> <message-id>
+redline info <file>
 ```
 
-Only delete messages after the first message in a thread. The first message is the original comment; deleting it means resolving/deleting the whole thread instead.
+## The Agent Loop
 
-Resolve or delete a whole thread only when the requested work is done or the user asks:
+1. `redline anchors <file>` — note which comments sit in the region you are about to change.
+2. Edit the document text **directly in the file** (you own the content).
+3. `redline anchors <file>` again — read the orphaned / needs-review leftovers. Most edits re-anchor silently; only the leftovers need action.
+4. `redline reanchor <file> <thread-id> --quote "<new text>"` — re-point only those. For many at once, batch them via `apply`.
+
+There is no race between automatic reconcile and explicit re-anchor: reconcile is lossless and idempotent, and every state-block write is serialized by Redline.
+
+## Comment Writes
+
+Create a new thread anchored to quoted text (captures quote + context selectors):
 
 ```bash
-bun src/agent.ts resolve <document.html> <thread-id>
+redline comment <file> "<exact quoted text>" "Your comment." [--occurrence N] --author Claude
 ```
 
-`resolve` is the same as deleting a thread. It permanently removes the thread from `#redline-state` in the document and unwraps its inline anchor. In the browser UI, the thread delete button performs this same resolve operation.
+The quote must be one shell argument. If it appears more than once, pass `--occurrence N` (1-based, document order). Use your real agent name for `--author`; agent paths default to `AI` when omitted.
 
-The safest path is to ask the user to resolve any thread they consider closed. If the last comment on a thread is a simple acknowledgement from the user and there are no remaining open questions, the agent may delete the thread, but broad confirmation is better before cleanup. Ask: "Shall I clean up all the threads you have acknowledged where there are no more open questions?"
-
-With a running server, agents may use the equivalent HTTP endpoints:
-
-```text
-POST /api/comments                                   # create a comment (body: CreateCommentInput)
-POST /api/comments/<thread-id>/replies
-DELETE /api/comments/<thread-id>/replies/<message-id>
-POST /api/comments/<thread-id>/resolve
-DELETE /api/comments/<thread-id>
-POST /api/agent/update                               # server twin of `apply` (body: AgentUpdateInput)
-```
-
-Use your actual agent name for `--author` or JSON `author` fields, for example `Claude`. Agent helper and update paths fall back to `AI` when the agent name is blank or omitted. Note: the generic reply endpoint defaults an omitted author to `User`, so pass `"author": "Claude"` explicitly in the JSON body when replying through that endpoint.
-
-Use the `<pid>.json` files in `~/.local/state/redline/servers/` to find a running server's URL and document path (see [When To Use](#when-to-use) for how to pick among them). The directory is fixed and per-user, so it resolves the same way no matter which directory the agent runs in.
-
-## Revise HTML
-
-Agents may edit the HTML file directly. When doing so:
-
-- Keep the `#redline-state` JSON script unless every thread is resolved.
-- Preserve all unresolved `data-redline-anchor` spans.
-- If replacing the whole document, carry over unresolved anchors and the embedded state, or use:
+Reply, edit, delete a reply, delete a whole thread:
 
 ```bash
-bun src/agent.ts apply <document.html> <payload.json>
+redline reply <file> <thread-id> "I revised this section." --author Claude
+redline edit-message <file> <thread-id> <message-id> "Updated text."
+redline delete-reply <file> <thread-id> <message-id>
+redline delete-thread <file> <thread-id>
 ```
 
-Payloads may include:
+`delete-thread` removes the thread from the state block (this is what was formerly "resolve"; there is no separate kept-resolved state). Only delete a reply by a message id **after** the first message — the first message is the original comment; to remove it, delete the whole thread. Delete threads only when the work is done or the user asks.
+
+## Anchor Writes & Batch
+
+Re-point one comment when reconcile orphaned it or matched with low confidence (state block only):
+
+```bash
+redline reanchor <file> <thread-id> --quote "<new text>" [--occurrence N]
+```
+
+One atomic batch of comment/anchor ops — create comments, replies, edits, thread deletes, and bulk re-anchors. **No content field**: Redline never writes content.
+
+```bash
+redline apply <file> <payload.json>
+```
+
+Example payload:
 
 ```json
 {
-  "html": "<!doctype html>...",
-  "comments": [
-    {
-      "body": "This claim needs a source.",
-      "author": "Claude",
-      "quote": "growth improved by 40%",
-      "anchor": {
-        "type": "text-range",
-        "anchorId": "thread_source_needed",
-        "quote": "growth improved by 40%"
-      }
-    }
-  ],
+  "comments": [{ "quote": "growth improved by 40%", "body": "Needs a source.", "author": "Claude" }],
   "replies": [{ "threadId": "thread_abc123", "body": "Updated.", "author": "Claude" }],
-  "resolveThreadIds": ["thread_done456"]
+  "edits": [{ "threadId": "thread_abc123", "messageId": "message_xyz", "body": "Reworded." }],
+  "deleteThreads": ["thread_done456"],
+  "deleteReplies": [{ "threadId": "thread_abc123", "messageId": "message_old" }],
+  "reanchors": [{ "threadId": "thread_orphan1", "quote": "the new phrasing" }]
 }
 ```
 
-## Add A Comment
+## Editing Content
 
-Prefer the helper command. It creates a new top-level anchored comment thread, accepts your agent name with `--author`, falls back to `AI` when the name is blank or omitted, and enforces the id rules:
+Edit the file's content directly with your normal tools — Redline reconciles on its next load/render. Keep the `#redline-state` block intact; if you rewrite the whole file, carry the block over (or you lose the comments — this clobber risk is accepted as the price of letting you be the primary writer). Never hand-write inline anchor spans; they are not part of this model anymore.
 
-```bash
-bun src/agent.ts comment <document.html> "<exact quoted text>" "Your comment." [--occurrence N] --author Claude
-```
+Thread ids must match `^thread_[A-Za-z0-9_-]{1,128}$`. Inside `#redline-state`, `<` is escaped as `<` so the payload can't break out of the script tag.
 
-The quote must be one shell argument (wrap it in quotes); everything after it is the comment body. This command creates the first message in a new thread; use `reply` only when responding inside an existing thread. Pass `--thread-id thread_xyz` to choose the id (it must start with `thread_`); otherwise one is generated. The quote should match the rendered document text exactly so the browser can highlight it.
+## HTTP (when scripting against a running server)
 
-If the same quote appears multiple times, the helper rejects the command unless you pass `--occurrence N`, where `N` is the 1-based occurrence in document order:
-
-```bash
-bun src/agent.ts comment <document.html> "growth improved by 40%" "This second claim needs a source." --occurrence 2 --author Claude
-```
-
-The helper records `anchor.occurrence` and wraps the selected occurrence in a `data-redline-anchor` span in the source HTML.
-
-On a running server, the equivalent is `POST /api/comments` with a `CreateCommentInput` body, or `bun src/agent.ts apply` / `POST /api/agent/update` with a `comments` entry when batching with replies or an HTML revision.
-
-For direct HTML editing, choose a unique `thread_`-prefixed id, wrap the exact target text in a span, and add a matching thread entry. Use manual embedded-state editing only when a helper/API path is not enough.
-
-HTML:
-
-```html
-<span data-redline-anchor="thread_source_needed">growth improved by 40%</span>
-```
-
-Embedded state:
-
-```json
-{
-  "id": "thread_source_needed",
-  "anchor": {
-    "type": "text-range",
-    "anchorId": "thread_source_needed",
-    "quote": "growth improved by 40%"
-  },
-  "quote": "growth improved by 40%",
-  "author": "Claude",
-  "createdAt": "2026-06-02T12:00:00.000Z",
-  "updatedAt": "2026-06-02T12:00:00.000Z",
-  "messages": [
-    {
-      "id": "message_source_needed",
-      "author": "Claude",
-      "body": "This claim needs a source.",
-      "createdAt": "2026-06-02T12:00:00.000Z"
-    }
-  ]
-}
-```
-
-If editing embedded state by hand and the same quote appears multiple times, do not rely on quote text alone. Insert the span around the specific occurrence in the HTML, or set `anchor.occurrence` (1-based, in document order) for fallback matching.
-
-Inside `#redline-state`, escape `<` in JSON strings as `\u003c` to avoid breaking the HTML script tag.
+The CLI is enough for almost everything. To script raw HTTP, resolve the docId first (`redline docid <file>`), then call the doc-scoped routes under `/api/docs/<docId>/…`: `GET state`, `GET anchors`, `POST comments`, `POST comments/<id>/replies`, `PUT comments/<id>/messages/<mid>`, `DELETE comments/<id>/replies/<mid>`, `DELETE comments/<id>`, `POST anchors/<id>/reanchor`, `GET agent/comments/index?since=`, `GET agent/comments/<id>`, `GET agent/info`, `POST agent/update`. Write endpoints accept an optional `expectedVersion`; a mismatch returns 409 with the current state to rebase from. A stale docId returns 404 — re-resolve by path.
