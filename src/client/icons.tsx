@@ -49,6 +49,40 @@ export const ChevronRightIcon = () => (
   </svg>
 );
 
+// Closed-folder glyph for file-browser rows (the open-folder OpenIcon reads as an
+// action; a closed folder reads as a place you can enter).
+export const FolderRowIcon = () => (
+  <svg class="row-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <path
+      d="M3.5 7.4A1.7 1.7 0 0 1 5.2 5.7h3.9l1.7 2h7.9A1.7 1.7 0 0 1 20.5 9.4v7.4A1.7 1.7 0 0 1 18.8 18.5H5.2A1.7 1.7 0 0 1 3.5 16.8z"
+      stroke="currentColor"
+      stroke-width="1.6"
+      stroke-linejoin="round"
+    />
+  </svg>
+);
+
+// Page glyph with a folded corner for document rows.
+export const DocIcon = () => (
+  <svg class="row-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <path
+      d="M6.8 3.8h6.4l4 4v11.9a.5.5 0 0 1-.5.5H6.8a.5.5 0 0 1-.5-.5V4.3a.5.5 0 0 1 .5-.5Z"
+      stroke="currentColor"
+      stroke-width="1.5"
+      stroke-linejoin="round"
+    />
+    <path d="M13 3.8V8h4" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" />
+    <path d="M9 12.5h6M9 15.3h4.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+  </svg>
+);
+
+export const SearchIcon = () => (
+  <svg class="row-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <circle cx="10.5" cy="10.5" r="5.4" stroke="currentColor" stroke-width="1.7" />
+    <path d="m15 15 4 4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+  </svg>
+);
+
 export const RailIcon = () => (
   <svg class="btn-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
     <rect x="3.5" y="5" width="17" height="14" rx="2.2" stroke="currentColor" stroke-width="1.8" />

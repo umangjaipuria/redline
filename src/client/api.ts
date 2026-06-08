@@ -51,6 +51,7 @@ export const api = {
       `/api/files?dir=${encodeURIComponent(dir)}`,
     ),
   openDialog: () => send<{ cancelled?: boolean } & Partial<DocumentSessionInfo>>("POST", "/api/open-dialog"),
+  howto: () => send<{ path: string | null }>("GET", "/api/howto"),
 
   createComment: (docId: string, body: CreateCommentRequest) =>
     send<DocumentStateResponse>("POST", `/api/docs/${docId}/comments`, body),

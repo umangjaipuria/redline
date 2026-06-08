@@ -100,29 +100,53 @@ button:disabled { cursor: not-allowed; }
 }
 .brand-home:not(:disabled):hover .app-name { color: var(--red-deep); }
 
-.document-id { display: flex; flex-direction: column; min-width: 0; line-height: 1.2; }
+/* The file name, its folder, and the open-file affordance read as one control:
+   clicking anywhere opens the file switcher. A resting surface + hairline border
+   signal it is interactive without waiting for hover, and the trailing icon sits
+   directly after the text rather than floating out at the edge. */
+.document-switch {
+  display: flex; align-items: center; gap: 10px; min-width: 0;
+  margin-left: 2px; padding: 5px 12px 5px 9px;
+  border: 1px solid var(--line-soft); border-radius: 10px;
+  background: var(--panel-raised); color: inherit; text-align: left; cursor: pointer;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+.document-switch:hover { border-color: var(--line); box-shadow: var(--shadow-card); }
+.document-switch:hover .document-switch-icon { color: var(--red-deep); }
+.document-switch:focus-visible {
+  outline: none; border-color: var(--red-line); box-shadow: 0 0 0 3px var(--red-wash);
+}
+
+/* flex-start (not the default stretch) lets the column shrink to its text so the
+   trailing icon stays anchored beside the path instead of being pushed to the cap. */
+.document-id {
+  display: flex; flex-direction: column; align-items: flex-start;
+  min-width: 0; max-width: min(38vw, 520px); gap: 1px; line-height: 1.25;
+}
 .document-name {
+  max-width: 100%;
   font-size: 13px; font-weight: 600; color: var(--ink);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .document-path {
-  max-width: min(40vw, 560px);
-  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  display: flex; min-width: 0; max-width: 100%;
   color: var(--ink-faint);
   font-family: var(--font-mono);
   font-size: 11px;
   letter-spacing: -0.01em;
 }
+/* Head shrinks and ellipsizes at its tail; the last folder segment stays pinned,
+   producing a middle truncation that keeps the most meaningful context visible. */
+.path-head { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.path-tail { flex: none; white-space: nowrap; }
 
-button.open-icon {
-  flex: none;
-  width: 30px;
-  padding: 0;
-  border: 0;
-  background: none;
+.document-switch-icon {
+  flex: none; display: grid; place-items: center;
+  width: 24px; height: 24px;
   color: var(--ink-faint);
+  transition: color 140ms ease;
 }
-button.open-icon:hover { color: var(--red-deep); background: none; }
+.document-switch-icon .btn-icon { width: 18px; height: 18px; }
 
 .toolbar {
   display: flex;
@@ -140,7 +164,7 @@ button.open-icon:hover { color: var(--red-deep); background: none; }
 }
 
 .app-shell[data-empty="true"] .toolbar,
-.app-shell[data-empty="true"] .document-id { display: none; }
+.app-shell[data-empty="true"] .document-switch { display: none; }
 
 .author-control {
   display: flex;
@@ -348,18 +372,35 @@ button.open-icon:hover { color: var(--red-deep); background: none; }
 .empty-state-card h1 { font-family: var(--font-display); font-size: 20px; font-weight: 600; margin: 0; }
 .empty-state-card p { margin: 0; color: var(--ink-soft); font-size: 14px; line-height: 1.55; }
 .empty-state-card .primary-button { margin-top: 10px; }
+.guide-link {
+  margin-top: 14px; border: 0; background: none; font-size: 13px;
+  color: var(--ink-faint);
+  text-decoration: underline; text-decoration-color: var(--focus-line);
+  text-decoration-thickness: 1px; text-underline-offset: 3px;
+  transition: color 0.12s, text-decoration-color 0.12s;
+}
+.guide-link:hover { color: var(--red-deep); text-decoration-color: var(--red-line); }
 
 .empty-state-card.chooser { max-width: 460px; }
 .chooser-list {
   list-style: none; margin: 18px 0 6px; padding: 0; width: 100%;
   display: flex; flex-direction: column; gap: 8px;
 }
+.chooser-row { display: flex; align-items: stretch; gap: 8px; }
 .chooser-item {
-  width: 100%; display: flex; flex-direction: column; gap: 2px; text-align: left;
+  flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; text-align: left;
   background: var(--panel-raised); border: 1px solid var(--line); border-radius: 10px;
   padding: 12px 14px; cursor: pointer; transition: border-color 0.12s, background 0.12s, box-shadow 0.12s;
 }
 .chooser-item:hover { border-color: var(--red-line); box-shadow: 0 0 0 3px var(--red-wash); }
+.chooser-close {
+  flex: none; width: 36px; align-self: stretch;
+  display: grid; place-items: center;
+  background: var(--panel-raised); border: 1px solid var(--line); border-radius: 10px;
+  color: var(--ink-faint); font-size: 13px; cursor: pointer;
+  transition: border-color 0.12s, background 0.12s, color 0.12s;
+}
+.chooser-close:hover { border-color: var(--red-line); background: var(--red-wash); color: var(--red-deep); }
 .chooser-title { font-weight: 600; font-size: 14px; }
 .chooser-path { color: var(--ink-faint); font-family: var(--font-mono); font-size: 11px; word-break: break-all; }
 
@@ -504,6 +545,9 @@ textarea:focus {
   border-radius: 12px; box-shadow: var(--shadow-float);
   display: flex; flex-direction: column; overflow: hidden;
 }
+/* Stable height so navigating between folders with different file counts doesn't
+   resize the dialog — the list area flexes and scrolls inside a fixed frame. */
+.file-browser { height: min(80vh, 620px); }
 .modal-head {
   display: flex; align-items: center; justify-content: space-between;
   padding: 14px 18px; border-bottom: 1px solid var(--line);
@@ -511,21 +555,86 @@ textarea:focus {
 .modal-head h2 { font-family: var(--font-display); font-size: 17px; margin: 0; }
 .modal-head .link-button { border: 0; background: none; color: var(--ink-soft); font-weight: 600; font-size: 13px; }
 .modal-head .link-button:hover { color: var(--red-deep); }
-.file-path {
-  font-family: var(--font-mono); font-size: 11px; color: var(--ink-faint);
-  padding: 8px 18px; border-bottom: 1px solid var(--line-soft);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+/* Recent-folder chips */
+.recent-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 18px; border-bottom: 1px solid var(--line-soft);
 }
-.file-list { list-style: none; margin: 0; padding: 8px; overflow-y: auto; }
+.recent-label {
+  flex: none; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.07em;
+  color: var(--ink-faint);
+}
+.recent-chips { display: flex; gap: 6px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.recent-chips::-webkit-scrollbar { display: none; }
+.recent-chip {
+  flex: none; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  padding: 4px 11px; border-radius: 999px; font-size: 12px;
+  background: var(--panel); border: 1px solid var(--line-soft); color: var(--ink-soft);
+  transition: border-color 0.12s, color 0.12s, background 0.12s;
+}
+.recent-chip:hover { border-color: var(--red-line); color: var(--red-deep); background: var(--red-wash); }
+.recent-chip.active { border-color: var(--red-line); color: var(--red-deep); }
+
+/* Breadcrumb + filter toolbar */
+.browser-toolbar {
+  display: flex; align-items: center; gap: 12px;
+  padding: 9px 18px; border-bottom: 1px solid var(--line-soft);
+}
+.crumbs {
+  flex: 1; min-width: 0; display: flex; align-items: center; flex-wrap: nowrap;
+  overflow: hidden; font-family: var(--font-mono); font-size: 12px;
+}
+.crumb-wrap { display: inline-flex; align-items: center; min-width: 0; }
+.crumb {
+  border: 0; background: none; font: inherit; padding: 2px 5px; border-radius: 6px;
+  color: var(--ink-soft); max-width: 150px; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+  /* Persistent underline so segments read as clickable at rest, not only on hover. */
+  text-decoration: underline; text-decoration-color: var(--focus-line);
+  text-decoration-thickness: 1px; text-underline-offset: 3px;
+}
+.crumb:hover { color: var(--red-deep); background: var(--red-wash); text-decoration-color: var(--red-line); }
+.crumb.current { color: var(--ink); font-weight: 600; text-decoration: none; }
+.crumb-sep { flex: none; color: var(--ink-faint); padding: 0 1px; }
+
+.file-filter {
+  flex: none; width: 168px; display: flex; align-items: center; gap: 6px;
+  padding: 5px 10px; border-radius: 8px;
+  background: var(--panel); border: 1px solid var(--line-soft);
+  transition: border-color 0.12s, box-shadow 0.12s, background 0.12s;
+}
+.file-filter:focus-within {
+  border-color: var(--focus-line); box-shadow: 0 0 0 3px var(--focus-wash); background: var(--panel-raised);
+}
+.file-filter-icon { display: grid; place-items: center; color: var(--ink-faint); flex: none; }
+.file-filter-icon .row-icon { width: 14px; height: 14px; }
+.file-filter input {
+  border: 0; background: none; outline: none; width: 100%; min-width: 0;
+  font-size: 13px; color: var(--ink);
+}
+
+/* File rows */
+.file-list { list-style: none; margin: 0; padding: 8px; overflow-y: auto; flex: 1; min-height: 0; }
 .file-entry {
-  display: flex; align-items: center; gap: 8px;
+  display: flex; align-items: center; gap: 10px;
   padding: 8px 10px; border-radius: 8px; font-size: 13px; cursor: pointer;
 }
+.row-icon { width: 17px; height: 17px; flex: none; }
+.row-icon-wrap { display: grid; place-items: center; flex: none; color: var(--ink-soft); }
+.file-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-entry:hover { background: var(--panel); }
+.file-entry.dir .row-chevron {
+  display: grid; place-items: center; flex: none; color: var(--ink-faint);
+  opacity: 0; transition: opacity 0.12s;
+}
+.file-entry.dir .row-chevron .btn-icon { width: 14px; height: 14px; }
+.file-entry.dir:hover .row-chevron { opacity: 1; }
+.file-entry.file.html:hover { background: var(--red-wash); }
+.file-entry.file.html:hover .row-icon-wrap { color: var(--red-deep); }
 .file-entry.file.other { color: var(--ink-faint); cursor: default; }
+.file-entry.file.other .row-icon-wrap { color: var(--line); }
 .file-entry.file.other:hover { background: none; }
-.file-icon { width: 18px; text-align: center; }
-.file-loading { padding: 12px; color: var(--ink-soft); font-size: 13px; }
+.file-loading { padding: 14px 12px; color: var(--ink-soft); font-size: 13px; }
 
 /* ---------- Animations ---------- */
 

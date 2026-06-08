@@ -6,7 +6,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { reconcileDocument, readDocument, type DocumentView } from "../app";
+import { reconcileDocument, versionFor, type DocumentView } from "../app";
 import { adapterForPath } from "../formats";
 import type { DocumentSessionInfo } from "../shared";
 import { generateDocId } from "./docid";
@@ -25,10 +25,48 @@ export interface DocumentSession {
   // the on-disk version against it to detect external edits without re-firing on
   // our own writes.
   lastKnownVersion: string;
+  // Cheap change-detection signature from the last time we VERIFIED the file's
+  // bytes hash to `lastKnownVersion`. The poll skips the expensive read+render
+  // entirely when this is unchanged, so an idle open document costs one stat()
+  // per tick, not a render. Set to null after any write of ours (and after a
+  // reconcile) so the next poll re-validates against disk rather than trusting a
+  // signature that might have been captured across an interleaved external edit.
+  lastStat: StatSignature | null;
   subscribers: Set<Controller>;
 }
 
+interface StatSignature {
+  mtimeMs: number;
+  ctimeMs: number; // inode change time — bumps on a content write even if mtime is preserved
+  size: number;
+  ino: number; // changes when an atomic temp+rename swaps the file
+}
+
 const encoder = new TextEncoder();
+
+// A cheap filesystem signature for change detection. null when the file is gone.
+// mtime+size alone can miss a same-length edit on a coarse-mtime filesystem;
+// ctime and ino close most of that gap (ctime can't be set backwards by normal
+// tools, and an atomic-rename replacement changes the inode).
+function statSignature(filePath: string): StatSignature | null {
+  try {
+    const stat = fs.statSync(filePath);
+    return { mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs, size: stat.size, ino: stat.ino };
+  } catch {
+    return null;
+  }
+}
+
+function sameStat(a: StatSignature | null, b: StatSignature | null): boolean {
+  return (
+    a !== null &&
+    b !== null &&
+    a.mtimeMs === b.mtimeMs &&
+    a.ctimeMs === b.ctimeMs &&
+    a.size === b.size &&
+    a.ino === b.ino
+  );
+}
 
 export class SessionManager {
   private readonly byDocId = new Map<string, DocumentSession>();
@@ -70,6 +108,9 @@ export class SessionManager {
       title: view.title,
       lastActiveAt: Date.now(),
       lastKnownVersion: view.version,
+      // null → the first poll re-validates against disk (reconcileDocument above
+      // may have written, and an external edit could interleave). Cheap: one read.
+      lastStat: null,
       subscribers: new Set(),
     };
     this.byDocId.set(docId, session);
@@ -130,6 +171,9 @@ export class SessionManager {
     session.updatedAt = view.updatedAt;
     session.title = view.title;
     session.lastKnownVersion = view.version;
+    // Don't trust a post-write stat: an external edit could have interleaved
+    // between our write and here. Force the next poll to validate by hash.
+    session.lastStat = null;
     session.lastActiveAt = Date.now();
     this.broadcastDoc(session, event, {
       docId: session.docId,
@@ -194,13 +238,31 @@ export class SessionManager {
   checkExternalChanges(): void {
     for (const session of [...this.byDocId.values()]) {
       try {
+        const stat = statSignature(session.path);
+
         // Rename/delete: treat as external change, then close the session.
-        if (!fs.existsSync(session.path)) {
+        if (stat === null) {
           this.close(session.docId);
           continue;
         }
-        const onDisk = readDocument(session.path);
-        if (onDisk.version === session.lastKnownVersion) continue;
+
+        // Cheap gate: an unchanged signature means the bytes are untouched, so we
+        // skip the read + parse + render entirely. This is the common case every
+        // tick for every idle document — the whole point of the poll being
+        // affordable at many open docs.
+        if (sameStat(stat, session.lastStat)) continue;
+
+        // Stat moved but the bytes may still hash the same (our own atomic write,
+        // or a touch). Confirm against the content hash before doing real work —
+        // reading bytes is far cheaper than the full render in readDocument.
+        const onDiskVersion = versionFor(fs.readFileSync(session.path, "utf8"));
+        if (onDiskVersion === session.lastKnownVersion) {
+          // Verified: these exact bytes match our tracked version. Safe to cache
+          // this signature so the next tick takes the cheap path. (If an external
+          // write had interleaved, the hash would differ and we'd reconcile.)
+          session.lastStat = stat;
+          continue;
+        }
 
         // External edit detected. Reconcile (heal hints lazily) and announce.
         const { view } = reconcileDocument(session.path);
@@ -208,6 +270,10 @@ export class SessionManager {
         session.updatedAt = view.updatedAt;
         session.title = view.title;
         session.lastKnownVersion = view.version;
+        // reconcileDocument may self-heal-write here; leave lastStat null so the
+        // next tick re-validates by hash rather than trusting a possibly-raced
+        // post-write signature.
+        session.lastStat = null;
         this.broadcastDoc(session, "external.changed", {
           docId: session.docId,
           version: view.version,

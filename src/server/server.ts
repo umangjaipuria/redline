@@ -37,6 +37,9 @@ import { SessionError, SessionManager, type DocumentSession } from "./sessions";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.resolve(__dirname, "../../dist");
 const publicDir = path.resolve(__dirname, "../../public");
+// The bundled how-it-works document, offered as an in-app onboarding doc from the
+// landing page. Absent in some packaged builds — the endpoint reports null then.
+const howtoPath = path.resolve(__dirname, "../../docs/howto.html");
 const encoder = new TextEncoder();
 
 export interface ServerHandlerContext {
@@ -81,6 +84,10 @@ async function handleRequest(request: Request, ctx: ServerHandlerContext): Promi
   if (pathname === "/api/files" && request.method === "GET") {
     const listing = listDirectory(url.searchParams.get("dir") ?? "");
     return json(listing);
+  }
+
+  if (pathname === "/api/howto" && request.method === "GET") {
+    return json({ path: fs.existsSync(howtoPath) ? howtoPath : null });
   }
 
   if (pathname === "/api/open-dialog" && request.method === "POST") {
@@ -627,8 +634,22 @@ if (import.meta.main) {
   if (reused) {
     console.log(reused);
   } else {
+    await ensureClientBuilt();
     startServer(options);
   }
+}
+
+// Build the browser client on demand so `bun run start` works on a fresh clone
+// with no separate build step. Builds when the bundle is missing OR incomplete
+// (e.g. an interrupted earlier build that left only some files) — routine runs
+// skip it; client-code changes are rebuilt explicitly via `build:client`.
+async function ensureClientBuilt(): Promise<void> {
+  // All three are what the shell loads (index.html references main.js + style.css).
+  const required = ["index.html", "main.js", "style.css"];
+  if (required.every((f) => fs.existsSync(path.resolve(distDir, f)))) return;
+  console.log("Building the web client (first run)…");
+  const { buildClient } = await import("../client/build");
+  await buildClient();
 }
 
 function parseArgs(args: string[]): ServerOptions {

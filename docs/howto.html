@@ -3,476 +3,365 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Redline HOWTO</title>
+    <title>Redline — User Guide</title>
     <style>
+      @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+
       :root {
         color-scheme: light;
-        --paper: #fffdfa;
-        --surface: #ffffff;
-        --ink: #23201b;
-        --muted: #675f54;
-        --faint: #8e8375;
-        --line: #e2d8cb;
-        --accent: #c4361d;
-        --accent-deep: #9e2a17;
-        --accent-soft: #fff0eb;
-        --sage: #eff5ef;
-        --blue: #edf4fb;
-        --shadow: 0 18px 55px rgba(35, 32, 27, 0.10);
+        --paper: #ffffff;
+        --panel: #f5f4f1;
+        --ink: #211c15;
+        --ink-soft: #6f665a;
+        --ink-faint: #978c7c;
+        --line: #e4e0d8;
+        --line-soft: #eeebe4;
+        --red: #c4361d;
+        --red-deep: #a02712;
+
+        --display: "Fraunces", "Iowan Old Style", Georgia, serif;
+        --ui: "Hanken Grotesk", ui-sans-serif, system-ui, -apple-system, sans-serif;
+        --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
       }
 
-      * {
-        box-sizing: border-box;
-      }
+      * { box-sizing: border-box; }
 
       body {
         margin: 0;
         color: var(--ink);
-        background:
-          linear-gradient(180deg, #fffaf4 0, var(--paper) 360px),
-          var(--paper);
-        font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        line-height: 1.62;
+        background: var(--paper);
+        font-family: var(--ui);
+        font-size: 16.5px;
+        line-height: 1.68;
+        -webkit-font-smoothing: antialiased;
       }
 
       main {
-        width: min(100%, 1080px);
+        width: min(100%, 720px);
         margin: 0 auto;
-        padding: 48px 24px 72px;
+        padding: 56px 24px 88px;
       }
 
-      header {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr);
-        gap: 18px;
-        margin-bottom: 34px;
-        padding: 34px;
-        border: 1px solid var(--line);
-        border-radius: 18px;
-        background: rgba(255, 255, 255, 0.82);
-        box-shadow: var(--shadow);
-      }
+      /* ---------- masthead ---------- */
 
       .eyebrow {
-        margin: 0;
-        color: var(--accent-deep);
-        font-size: 0.78rem;
-        font-weight: 800;
-        letter-spacing: 0.08em;
+        margin: 0 0 12px;
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.14em;
         text-transform: uppercase;
-      }
-
-      h1,
-      h2,
-      h3 {
-        margin: 0;
-        line-height: 1.12;
+        color: var(--red-deep);
       }
 
       h1 {
-        max-width: 780px;
-        font-size: clamp(2.25rem, 6vw, 4.6rem);
-        letter-spacing: 0;
-      }
-
-      h2 {
-        font-size: clamp(1.55rem, 3vw, 2.1rem);
-        letter-spacing: 0;
-      }
-
-      h3 {
-        font-size: 1rem;
-      }
-
-      p {
         margin: 0;
+        font-family: var(--display);
+        font-weight: 600;
+        font-size: clamp(2.4rem, 7vw, 3.1rem);
+        line-height: 1.05;
+        letter-spacing: -0.01em;
       }
 
       .lede {
-        max-width: 780px;
-        color: var(--muted);
-        font-size: 1.16rem;
+        margin: 16px 0 0;
+        max-width: 60ch;
+        font-size: 1.12rem;
+        color: var(--ink-soft);
       }
 
-      .quick-start {
-        display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
-        gap: 12px;
-        margin-top: 8px;
-      }
-
-      .quick-start div,
-      section,
-      .callout {
-        border: 1px solid var(--line);
-        background: var(--surface);
-        box-shadow: 0 1px 2px rgba(35, 32, 27, 0.04);
-      }
-
-      .quick-start div {
-        min-height: 118px;
-        padding: 16px;
-        border-radius: 14px;
-      }
-
-      .quick-start strong {
-        display: block;
+      .masthead {
+        padding-bottom: 28px;
         margin-bottom: 8px;
-        color: var(--accent-deep);
-        font-size: 0.82rem;
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
+        border-bottom: 1px solid var(--line);
       }
 
-      .quick-start span {
+      /* ---------- sections ---------- */
+
+      section { margin-top: 44px; }
+
+      h2 {
+        margin: 0 0 14px;
+        font-family: var(--display);
+        font-weight: 600;
+        font-size: 1.5rem;
+        line-height: 1.2;
+        display: flex;
+        align-items: baseline;
+        gap: 12px;
+      }
+      h2 .step {
+        flex: none;
+        font-family: var(--ui);
+        font-weight: 600;
+        font-size: 0.78rem;
+        color: var(--red-deep);
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        width: 1.7rem;
+        height: 1.7rem;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        align-self: center;
+      }
+
+      h3 {
+        margin: 24px 0 0;
+        font-family: var(--display);
+        font-weight: 600;
+        font-size: 1.08rem;
+        line-height: 1.3;
+      }
+
+      p { margin: 12px 0 0; }
+      h2 + p, h3 + p { margin-top: 8px; }
+      a { color: var(--red-deep); text-underline-offset: 2px; }
+      strong { font-weight: 600; }
+      em { color: var(--ink-soft); }
+
+      ul, ol { margin: 12px 0 0; padding-left: 1.3rem; }
+      li { margin: 7px 0 0; padding-left: 0.2rem; }
+      li::marker { color: var(--ink-faint); }
+
+      /* ---------- code ---------- */
+
+      code {
+        font-family: var(--mono);
+        font-size: 0.86em;
+        padding: 0.1em 0.34em;
+        border-radius: 4px;
+        background: var(--panel);
+        border: 1px solid var(--line-soft);
+        color: var(--red-deep);
+      }
+
+      pre {
+        margin: 14px 0 0;
+        padding: 15px 18px;
+        overflow-x: auto;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        font-size: 0.85rem;
+        line-height: 1.6;
+        color: var(--ink);
+      }
+      pre code {
+        padding: 0;
+        border: 0;
+        border-radius: 0;
+        background: none;
+        color: inherit;
+        font-size: inherit;
+      }
+      pre .c { color: var(--ink-faint); }
+
+      /* ---------- tip / note ---------- */
+
+      .tip {
+        margin: 16px 0 0;
+        padding: 13px 16px;
+        background: var(--panel);
+        border-left: 3px solid var(--red);
+        border-radius: 0 8px 8px 0;
+      }
+      .tip .label {
         display: block;
-        color: var(--muted);
+        margin-bottom: 3px;
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.07em;
+        text-transform: uppercase;
+        color: var(--red-deep);
+      }
+      .tip p { margin: 0; color: var(--ink-soft); }
+
+      /* ---------- say-this example ---------- */
+
+      .say {
+        margin: 14px 0 0;
+        padding: 14px 18px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        font-family: var(--display);
+        font-size: 1.05rem;
+        font-style: italic;
+        color: var(--ink);
+      }
+
+      /* ---------- "good to know" rule ---------- */
+
+      .aside-head {
+        margin-top: 64px;
+        padding-top: 20px;
+        border-top: 1px solid var(--line);
+      }
+      .aside-head h2 { margin: 0; }
+      .aside-head p { margin-top: 6px; color: var(--ink-soft); }
+
+      footer {
+        margin-top: 56px;
+        padding-top: 20px;
+        border-top: 1px solid var(--line);
+        color: var(--ink-faint);
         font-size: 0.95rem;
       }
 
-      .grid {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) minmax(280px, 0.78fr);
-        gap: 18px;
-        align-items: start;
-      }
-
-      section {
-        margin-top: 18px;
-        padding: 26px;
-        border-radius: 16px;
-      }
-
-      section > p,
-      section > ol,
-      section > ul {
-        margin-top: 16px;
-      }
-
-      ol,
-      ul {
-        margin-bottom: 0;
-        padding-left: 1.25rem;
-      }
-
-      li + li {
-        margin-top: 10px;
-      }
-
-      code,
-      pre {
-        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-      }
-
-      code {
-        padding: 0.12rem 0.36rem;
-        border-radius: 6px;
-        background: #f2ede5;
-        color: #3a3027;
-        font-size: 0.92em;
-      }
-
-      pre {
-        margin: 16px 0 0;
-        overflow-x: auto;
-        padding: 16px;
-        border: 1px solid #eadfd1;
-        border-radius: 12px;
-        background: #1f1b17;
-        color: #fff6eb;
-        font-size: 0.88rem;
-        line-height: 1.55;
-      }
-
-      pre code {
-        padding: 0;
-        border-radius: 0;
-        background: transparent;
-        color: inherit;
-      }
-
-      .callout {
-        margin-top: 18px;
-        padding: 18px;
-        border-radius: 14px;
-        background: var(--accent-soft);
-      }
-
-      .callout.sage {
-        background: var(--sage);
-      }
-
-      .callout.blue {
-        background: var(--blue);
-      }
-
-      .callout.amber {
-        background: linear-gradient(180deg, #fcf1d6 0%, var(--surface) 70%);
-        border-color: rgba(169, 118, 28, 0.42);
-      }
-
-      .callout strong {
-        display: block;
-        margin-bottom: 6px;
-      }
-
-      .two-column-list {
-        columns: 2;
-        column-gap: 28px;
-      }
-
-      .two-column-list li {
-        break-inside: avoid;
-      }
-
-      .badge-row {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 8px;
-        margin-top: 18px;
-      }
-
-      .badge {
-        display: inline-flex;
-        align-items: center;
-        min-height: 30px;
-        padding: 0 11px;
-        border: 1px solid var(--line);
-        border-radius: 999px;
-        background: #fffaf4;
-        color: var(--muted);
-        font-size: 0.86rem;
-        font-weight: 700;
-      }
-
-      footer {
-        margin-top: 28px;
-        color: var(--faint);
-        font-size: 0.92rem;
-      }
-
-      @media (max-width: 820px) {
-        main {
-          padding: 24px 16px 48px;
-        }
-
-        header,
-        section {
-          padding: 22px;
-          border-radius: 14px;
-        }
-
-        .quick-start,
-        .grid {
-          grid-template-columns: 1fr;
-        }
-
-        .two-column-list {
-          columns: 1;
-        }
+      @media (max-width: 560px) {
+        main { padding: 36px 18px 64px; }
       }
     </style>
+      <meta name="redline-agent-guide" content="Redline review document. Agents: use the redline-review skill; review state is in the #redline-state block.">
+  <script type="application/json" id="redline-state">{"schemaVersion":2,"updatedAt":"2026-06-08T18:16:50.289Z","threads":[{"id":"thread_015d736981bd4a40","author":"User","createdAt":"2026-06-08T18:16:50.282Z","updatedAt":"2026-06-08T18:16:50.282Z","messages":[{"id":"message_39e82bb22ac24e2b","author":"User","body":"This is a comment thread. Select any text in the document and a card like this appears in the margin — try it on this sentence.","createdAt":"2026-06-08T18:16:50.282Z"}],"anchor":{"quote":"comment on it like a Google Doc","prefix":"nt in your browser and lets you","suffix":"— select text, leave a note in","posStart":169,"posEnd":210}},{"id":"thread_89bf0c067c804eba","author":"User","createdAt":"2026-06-08T18:16:50.284Z","updatedAt":"2026-06-08T18:16:50.286Z","messages":[{"id":"message_93722958918d4e6c","author":"User","body":"What happens to a comment if the agent rewrites the whole paragraph it was attached to?","createdAt":"2026-06-08T18:16:50.284Z"},{"id":"message_c480a29c080f4dca","author":"Claude","body":"It’s set aside as “orphaned” — kept in the margin with its original text so you can re-attach it. Nothing is ever dropped.","createdAt":"2026-06-08T18:16:50.286Z"}],"anchor":{"quote":"even if the wording shifted","prefix":"assage automatically,","suffix":". If an edit is too drastic to m","posStart":5130,"posEnd":5157}},{"id":"thread_2eab5d499d334595","author":"User","createdAt":"2026-06-08T18:16:50.288Z","updatedAt":"2026-06-08T18:16:50.288Z","messages":[{"id":"message_fa2444e135214e59","author":"User","body":"Confirmed — this is what lets me review confidential specs without anything leaving my laptop.","createdAt":"2026-06-08T18:16:50.288Z"}],"anchor":{"quote":"your documents never leave your computer","prefix":"achine and binds to 127.0.0.1 —","suffix":". (Binding it to a public addres","posStart":5974,"posEnd":6024}}]}</script>
   </head>
   <body>
     <main>
-      <header>
-        <p class="eyebrow">Local HTML review guide</p>
-        <h1>Redline HOWTO</h1>
+      <div class="masthead">
+        <p class="eyebrow">User guide</p>
+        <h1>Getting started with Redline</h1>
         <p class="lede">
-          Redline helps people and agents review HTML locally with comments.
-          The document remains ordinary HTML, while open feedback stays embedded in the same file.
+          Redline opens an agent-written HTML document in your browser and lets you comment on it like a
+          Google Doc — select text, leave a note in the margin, reply. Your agent reads the comments, revises
+          the document, and replies inline. The document and all of its review state live in the same file, so
+          there’s nothing extra to sync. This guide takes you from a fresh clone to your first round of review.
         </p>
-        <div class="quick-start" aria-label="Quick start">
-          <div>
-            <strong>1. Start</strong>
-            <span>Run the local Bun server against an HTML document.</span>
-          </div>
-          <div>
-            <strong>2. Comment</strong>
-            <span>Select text in the iframe and leave a margin note.</span>
-          </div>
-          <div>
-            <strong>3. Revise</strong>
-            <span>Ask your agent to revise the document and reply to each thread.</span>
-          </div>
-          <div>
-            <strong>4. Resolve</strong>
-            <span>Close threads only when the requested work is complete.</span>
-          </div>
-        </div>
-      </header>
-
-      <div class="grid">
-        <section>
-          <h2>For reviewers</h2>
-          <ol>
-            <li>Open the app with <code>bun run start docs/howto.html</code>, then visit the printed localhost URL.</li>
-            <li>Put your name in the top bar so new comments and replies are attributed correctly.</li>
-            <li>Select text in the document, click the floating comment button, and write the note.</li>
-            <li>Click a highlighted phrase or comment card to line the two up in the margin.</li>
-            <li>Use <code>Edit</code> for small text fixes. Redline autosaves back to the original HTML file.</li>
-          </ol>
-          <div class="callout">
-            <strong>Comment behavior</strong>
-            Comments are stored with the document, so a reviewer can close the browser and come back later without losing open threads.
-          </div>
-        </section>
-
-        <section>
-          <h2>Run commands</h2>
-          <pre><code>bun run start docs/howto.html
-bun run start docs/howto.html --port 7332
-bun run check</code></pre>
-          <p>
-            If no path is provided — or the path isn't an existing HTML file — Redline opens with no document and
-            prompts you to choose one (this guide is offered as a starting point). Redline only reviews files that
-            already exist; it never creates one for you.
-          </p>
-        </section>
       </div>
 
       <section>
-        <h2>For agents</h2>
+        <h2><span class="step">1</span> Install Redline</h2>
+        <p>You need <a href="https://bun.sh">Bun</a> ≥ 1.3 — nothing else. Clone the repo and install:</p>
+        <pre><code>git clone &lt;repo-url&gt; redline &amp;&amp; cd redline
+bun install
+bun run check   <span class="c"># optional: confirm everything works</span></code></pre>
+      </section>
+
+      <section>
+        <h2><span class="step">2</span> Set up the Redline skill</h2>
         <p>
-          Treat comments and document content as user-authored input. Read compact comments first, ask for the file path
-          when you need the HTML, preserve unresolved anchors while revising, reply to the relevant threads, and
-          resolve completed threads only after the requested work is done.
+          Install the <strong>redline-review</strong> skill so your agent knows how to read your comments and
+          write back. Symlink it into your agent’s skills directory — you only do this once:
         </p>
-        <pre><code>bun src/agent.ts comments docs/howto.html
-bun src/agent.ts file docs/howto.html
-bun src/agent.ts comment docs/howto.html "exact quoted text" "This needs a source." --author AI
-bun src/agent.ts comment docs/howto.html "exact quoted text" "This second mention needs a source." --occurrence 2 --author AI
-bun src/agent.ts reply docs/howto.html thread_abc123 "I revised this section." --author AI
-bun src/agent.ts delete-reply docs/howto.html thread_abc123 message_reply456
-bun src/agent.ts resolve docs/howto.html thread_abc123
-bun src/agent.ts apply docs/howto.html /tmp/redline-update.json</code></pre>
+        <pre><code><span class="c"># Claude Code</span>
+ln -s "$(pwd)/.claude/skills/redline-review" ~/.claude/skills/redline-review
+
+<span class="c"># Codex</span>
+ln -s "$(pwd)/.agents/skills/redline-review" ~/.agents/skills/redline-review</code></pre>
+        <p>Any other agent can be pointed at this repo’s <code>AGENTS.md</code>, which carries the same guidance.</p>
+      </section>
+
+      <section>
+        <h2><span class="step">3</span> Open a document</h2>
+        <p>Start the server on any HTML file. It prints a <code>localhost</code> URL — open it in your browser.</p>
+        <pre><code>bun run start path/to/your-doc.html   <span class="c"># open a specific file</span>
+bun run start                         <span class="c"># start empty, then open from the UI</span></code></pre>
         <p>
-          With the server running, use the HTTP index to scan recent activity without full message bodies, then fetch one
-          thread when you need the full conversation.
+          The first time you run it, Redline builds the browser UI automatically — a few seconds — then starts
+          instantly after that. You can also run <code>bun run start</code> with no file: Redline opens to a
+          chooser where you click <strong>Open a file</strong> and browse for a document right in the browser.
         </p>
-        <pre><code>curl 'http://127.0.0.1:7331/api/agent/comments/index?since=2026-01-01T00:00:00.000Z'
-curl http://127.0.0.1:7331/api/agent/comments/thread_abc123</code></pre>
-        <div class="badge-row" aria-label="Agent principles">
-          <span class="badge">Read before editing</span>
-          <span class="badge">Create top-level threads</span>
-          <span class="badge">Preserve open anchors</span>
-          <span class="badge">Reply with what changed</span>
-          <span class="badge">Resolve intentionally</span>
+        <p>
+          One server holds many documents at once. Click the <strong>redline logo</strong> in the top-left
+          corner at any time to see the list of open documents and switch between them, or open another file.
+        </p>
+        <div class="tip">
+          <span class="label">Redline only reviews existing files</span>
+          <p>It never creates a document for you — point it at an HTML file your agent already wrote.</p>
         </div>
       </section>
 
       <section>
-        <h2>Leave anchored comments</h2>
-        <p>
-          Use <code>comment</code> when proofreading or reviewing without editing directly. It creates the first message in a
-          new thread anchored to existing text; use <code>reply</code> only when responding inside a thread that already exists.
-        </p>
-        <pre><code>bun src/agent.ts comment docs/howto.html "claim to review" "Please add a source." --author AI</code></pre>
-        <div class="callout blue">
-          <strong>Repeated text</strong>
-          If the anchor text appears more than once, Redline will not guess. Pass <code>--occurrence N</code>, where
-          <code>N</code> is the 1-based occurrence in document order. The helper stores <code>anchor.occurrence</code>
-          and wraps the intended copy in a durable span.
+        <h2><span class="step">4</span> Leave comments</h2>
+        <ol>
+          <li>Type your name in the top bar so your comments are attributed to you.</li>
+          <li>Select any text in the document — a <strong>Comment</strong> button appears beside it (or press <code>Cmd+Shift+M</code>, <code>Ctrl+Shift+M</code> on Windows/Linux).</li>
+          <li>Write your note and post it. The passage is highlighted and a card appears in the margin.</li>
+          <li>Click a highlight or its card to line the two up. <strong>Reply</strong> to continue a thread, <strong>edit</strong> your own messages, or <strong>delete</strong> a thread once it’s handled.</li>
+        </ol>
+        <div class="tip">
+          <span class="label">You’re the reviewer</span>
+          <p>In this version you comment; your agent owns the document’s text and makes the actual edits. There’s no direct text editing in the page.</p>
         </div>
       </section>
 
       <section>
-        <h2>How state is stored</h2>
+        <h2><span class="step">5</span> Hand it to your agent</h2>
         <p>
-          A comment location is a lightweight span around the reviewed text. Agents should keep
-          data-redline-anchor spans
-          around the relevant revised text until the thread is resolved.
+          When you’ve left your comments, tell the agent that wrote the document to review them. With the skill
+          installed it finds the running Redline instance on its own — just say something like:
         </p>
-        <pre><code>&lt;span data-redline-anchor="thread_abc123"&gt;reviewed text&lt;/span&gt;
-
-&lt;script type="application/json" id="redline-state"&gt;
-  { "schemaVersion": 1, "updatedAt": "...", "threads": [] }
-&lt;/script&gt;</code></pre>
-        <div class="callout sage">
-          <strong>Durable by design</strong>
-          Resolved threads are removed from the JSON state and their inline anchors are unwrapped.
-        </div>
+        <p class="say">“I left comments in Redline on <span style="font-style:normal;font-family:var(--mono);font-size:0.82em;">your-doc.html</span>. Review them with the redline-review skill, revise the document, and reply to each thread.”</p>
+        <p>
+          The agent reads the threads, edits the document directly, replies to each one with what it changed,
+          and deletes the threads that are fully resolved. If it can’t locate the server, give it the file path
+          (it can work on the file directly) or the <code>localhost</code> URL the server printed.
+        </p>
       </section>
 
       <section>
-        <h2>When comments orphan</h2>
+        <h2><span class="step">6</span> Iterate</h2>
         <p>
-          A thread stays put as long as Redline can find its text &mdash; either by the persisted
-          <code>data-redline-anchor</code> span or, failing that, by matching the stored quote. If you rewrite the reviewed
-          text and the span is gone (or never existed), the quote no longer matches and the thread becomes
-          <strong>orphaned</strong>: it shows an amber &ldquo;Orphaned &middot; kept until you resolve it&rdquo; header and floats
-          free of the document. Redline keeps it open rather than dropping it, so feedback is never silently lost.
+          The agent’s edits and replies show up live in your open browser — no refresh needed. Read what
+          changed, leave new comments, and go again until the document is right.
         </p>
-        <p>When you revise anchored text, move the anchor with it:</p>
-        <ul>
-          <li>
-            <strong>Best &mdash; move the span.</strong> Keep the <code>data-redline-anchor</code> span wrapped around the
-            revised text. Its location is stored in the file, so it survives any rewording and the thread stays anchored.
-          </li>
-          <li>
-            <strong>Quote-only threads &mdash; update the quote.</strong> With no span, edit the thread&rsquo;s
-            <code>anchor.quote</code> (and top-level <code>quote</code>, plus <code>anchor.occurrence</code> if the new text
-            repeats) in <code>#redline-state</code> to the new text.
-          </li>
-          <li>
-            <strong>Subject removed entirely.</strong> Reply explaining the change and resolve the thread if the feedback is
-            addressed; otherwise leave it orphaned for a human to decide.
-          </li>
-        </ul>
-        <div class="callout amber">
-          <strong>Re-anchor, don&rsquo;t orphan</strong>
-          When in doubt, wrap the revised text in the same <code>data-redline-anchor</code> span. The persisted span is the
-          only anchor that survives arbitrary edits &mdash; the stored quote drifts as soon as the wording changes.
+        <div class="tip">
+          <span class="label">Agents don’t watch for new comments</span>
+          <p>Each time you finish a round of comments, tell the agent to review again. It won’t notice them on its own.</p>
         </div>
       </section>
 
-      <div class="grid">
-        <section>
-          <h2>Apply an agent update</h2>
-          <p>Create a JSON payload when an agent needs to revise HTML, add comments, and reply in one step.</p>
-          <pre><code>{
-  "html": "&lt;!doctype html&gt;...",
-  "comments": [
-    {
-      "body": "This claim needs a source.",
-      "author": "AI",
-      "quote": "claim to review",
-      "anchor": {
-        "type": "text-range",
-        "quote": "claim to review"
-      }
-    }
-  ],
-  "replies": [
-    {
-      "threadId": "thread_abc123",
-      "body": "I made the requested change.",
-      "author": "AI"
-    }
-  ],
-  "resolveThreadIds": []
-}</code></pre>
-        </section>
-
-        <section>
-          <h2>Troubleshooting</h2>
-          <ul class="two-column-list">
-            <li>If a save pauses, reload before continuing so edits do not overwrite a newer file.</li>
-            <li>If a thread is marked <strong>Orphaned</strong>, its anchored text changed; the thread stayed open for review. Re-wrap the revised text in its <code>data-redline-anchor</code> span to re-anchor it.</li>
-            <li>If an anchor is inside a closed <code>&lt;details&gt;</code> block, selecting the thread opens that disclosure temporarily; custom hidden panels may need a manual reveal path.</li>
-            <li>If quoted text appears more than once, use <code>--occurrence</code> instead of relying on a first match.</li>
-            <li>If the browser is closed, agents can still use the direct Bun helper commands.</li>
-            <li>If a file will not open, confirm it exists and ends in <code>.html</code> or <code>.htm</code>.</li>
-          </ul>
-          <div class="callout blue">
-            <strong>Good handoff</strong>
-            When an agent finishes a revision, the best reply says what changed and names any thread that still needs a human decision.
-          </div>
-        </section>
+      <div class="aside-head">
+        <h2>Good to know</h2>
+        <p>A few things about how Redline works under the hood.</p>
       </div>
+
+      <section>
+        <h3>Your comments live in the document</h3>
+        <p>
+          Redline has no database and no sidecar files. Every comment is stored inside a single block in the
+          same HTML file, so the document stays one portable artifact — commit it to git, send it to a colleague,
+          and the open review threads travel with it. Reopen the file later and your comments are still there.
+        </p>
+
+        <h3>The file barely changes</h3>
+        <p>
+          The only thing Redline ever writes is that one review block (plus a one-line marker so an agent opening
+          the file later knows it’s a Redline document). Highlights are drawn live in the browser, not saved into
+          the file — so apart from the review block, your document’s content stays byte-for-byte what your agent
+          wrote.
+        </p>
+
+        <h3>Comments are never silently lost</h3>
+        <p>
+          When the agent rewrites text a comment was anchored to, Redline re-finds the passage automatically,
+          even if the wording shifted. If an edit is too drastic to match, the comment is flagged <em>needs
+          review</em> or set aside as <em>orphaned</em> — kept in the margin with its original text so you can
+          re-attach it, never dropped.
+        </p>
+
+        <h3>Set your name</h3>
+        <p>
+          The name field in the top bar attributes your comments and replies. It’s remembered between sessions,
+          so you set it once. Your agent signs its replies with its own name.
+        </p>
+
+        <h3>One server, many documents</h3>
+        <p>
+          A single Redline server holds every document you’ve opened. The home button and the title in the top
+          bar take you back to the list to switch between them or open another file.
+        </p>
+
+        <h3>It’s local and private</h3>
+        <p>
+          The server runs on your own machine and binds to <code>127.0.0.1</code> — your documents never leave
+          your computer. (Binding it to a public address is possible but off by default, since the local API
+          isn’t authenticated.)
+        </p>
+      </section>
 
       <footer>
-        This sample is also a live Redline document: the highlighted phrases above are real anchors with open demo threads.
+        This guide is itself a Redline document — try selecting this sentence and leaving a comment.
       </footer>
     </main>
   </body>

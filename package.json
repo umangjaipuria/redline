@@ -13,8 +13,8 @@
     "build:client": "bun src/client/build.ts",
     "build:binary": "bun build --compile --outfile redline src/server/server.ts",
     "redline": "bun src/agent/cli.ts",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
-    "check": "tsc --noEmit -p tsconfig.json && bun test",
+    "typecheck": "bunx tsc --noEmit -p tsconfig.json",
+    "check": "bunx tsc --noEmit -p tsconfig.json && bun test",
     "test": "bun test",
     "coverage": "bun test --coverage"
   },

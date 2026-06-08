@@ -51,10 +51,11 @@ export function listDirectory(rawDir: string): DirectoryListing {
     });
   }
 
-  entries.sort((a, b) => {
-    if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
-    return a.name.localeCompare(b.name);
-  });
+  // Cluster the listing: directories first, then openable files, then everything
+  // else — so the files you can actually review sit right under the folders, and
+  // the not-yet-supported ones settle to the bottom. Alpha within each group.
+  const rank = (entry: FileEntry): number => (entry.isDirectory ? 0 : entry.isHtml ? 1 : 2);
+  entries.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
 
   const parent = path.dirname(dir);
   return { dir, parent: parent === dir ? null : parent, entries };

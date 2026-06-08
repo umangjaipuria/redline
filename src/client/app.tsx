@@ -4,6 +4,7 @@ import type { DocumentSessionInfo, DocumentStateResponse, SelectorInput } from "
 import { ApiError, api } from "./api";
 import { DocumentViewer } from "./viewer";
 import { FileBrowser } from "./file-browser";
+import { pushRecentFolder } from "./recent";
 import { Rail } from "./rail";
 import { BrandMark, FolderIcon, OpenIcon, PersonIcon, ChevronLeftIcon, ChevronRightIcon, RailIcon } from "./icons";
 import { commentNavigationState, commentNavigationTarget, composerInsertIndex, stackedRailItemLayout } from "./layout";
@@ -24,6 +25,7 @@ export function App() {
   const [notice, setNotice] = useState<{ title: string; body: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [browserOpen, setBrowserOpen] = useState(false);
+  const [howtoPath, setHowtoPath] = useState<string | null>(null);
   const [composerOpen, setComposerOpen] = useState(false);
   const [composerSelection, setComposerSelection] = useState<SelectorInput | null>(null);
   const [railCollapsed, setRailCollapsedState] = useState(() => localStorage.getItem("redline.railCollapsed") === "1");
@@ -157,12 +159,13 @@ export function App() {
       try {
         const { docs: list } = await api.listDocs();
         setDocs(list);
+        // Only a deep link (?doc=) opens a document directly. The bare root URL
+        // always lands on the chooser/empty page — never auto-opens a doc, even
+        // when just one is open.
         const requested = new URL(location.href).searchParams.get("doc");
         if (requested && list.some((doc) => doc.docId === requested)) {
           activate(requested);
-        } else if (list.length === 1) {
-          activate(list[0]!.docId);
-        } else if (list.length > 1) {
+        } else if (list.length > 0) {
           setMode("switcher");
         } else {
           setMode("empty");
@@ -171,6 +174,9 @@ export function App() {
         setMode("empty");
       }
     })();
+    // Surface the bundled how-it-works doc on the landing page (absent in some
+    // packaged builds — then the link simply doesn't appear).
+    api.howto().then(({ path }) => setHowtoPath(path)).catch(() => {});
     const serverEvents = new EventSource("/api/events");
     const refreshDocs = async () => {
       try {
@@ -225,11 +231,26 @@ export function App() {
   const openFile = async (path: string) => {
     try {
       const info = await api.openDoc(path);
+      pushRecentFolder(dirname(path));
       setBrowserOpen(false);
       setDocs((await api.listDocs()).docs);
       activate(info.docId);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not open that file.");
+    }
+  };
+
+  // Close a document from the chooser. Frees its server-side watcher + SSE and
+  // drops it from the list; with nothing left we fall back to the empty state.
+  const closeFile = async (docId: string) => {
+    try {
+      setError(null);
+      await api.closeDoc(docId);
+      const { docs: list } = await api.listDocs();
+      setDocs(list);
+      if (list.length === 0) setMode("empty");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not close that document.");
     }
   };
 
@@ -426,6 +447,12 @@ export function App() {
     if (created) setActiveThread(created.id);
   };
 
+  const guideLink = howtoPath ? (
+    <button type="button" class="guide-link" onClick={() => openFile(howtoPath)}>
+      New to Redline? Open the guide
+    </button>
+  ) : null;
+
   return (
     <div class="app-shell" data-rail={railMode} data-empty={mode !== "document" ? "true" : "false"}>
       <header class="topbar">
@@ -434,21 +461,33 @@ export function App() {
             type="button"
             class="brand-home"
             onClick={goToChooser}
-            disabled={docs.length <= 1}
-            title={docs.length > 1 ? "Switch document" : undefined}
+            disabled={mode !== "document"}
+            title={mode === "document" ? "All documents" : undefined}
           >
             <span class="brand-mark" aria-hidden="true"><BrandMark /></span>
             <span class="app-name">redline</span>
           </button>
-          {mode === "document" && state?.path && (
-            <span class="document-id" title={state.path}>
-              <span class="document-name">{basename(state.path)}</span>
-              <span class="document-path">{state.path}</span>
-            </span>
-          )}
-          <button type="button" class="icon-button open-icon" title="Open file…" aria-label="Open file" onClick={() => setBrowserOpen(true)}>
-            <OpenIcon />
-          </button>
+          {mode === "document" && state?.path && (() => {
+            const dir = displayDir(state.path);
+            return (
+              <button
+                type="button"
+                class="document-switch"
+                title={`${state.path}\nOpen another file…`}
+                aria-label={`Current file ${basename(state.path)}. Open another file`}
+                onClick={() => setBrowserOpen(true)}
+              >
+                <span class="document-switch-icon" aria-hidden="true"><OpenIcon /></span>
+                <span class="document-id">
+                  <span class="document-name">{basename(state.path)}</span>
+                  <span class="document-path">
+                    <span class="path-head">{dir.head}</span>
+                    {dir.tail && <span class="path-tail">{dir.tail}</span>}
+                  </span>
+                </span>
+              </button>
+            );
+          })()}
         </div>
         <div class="toolbar" aria-label="Document actions">
           <label class="author-control">
@@ -526,6 +565,7 @@ export function App() {
                 <button type="button" class="primary-button" onClick={() => setBrowserOpen(true)}>
                   Open a file…
                 </button>
+                {guideLink}
               </div>
             </div>
           )}
@@ -537,10 +577,19 @@ export function App() {
                 <p>Pick a document to review.</p>
                 <ul class="chooser-list">
                   {docs.map((doc) => (
-                    <li key={doc.docId}>
+                    <li key={doc.docId} class="chooser-row">
                       <button type="button" class="chooser-item" onClick={() => activate(doc.docId)}>
                         <span class="chooser-title">{basename(doc.path)}</span>
                         <span class="chooser-path">{doc.path}</span>
+                      </button>
+                      <button
+                        type="button"
+                        class="chooser-close"
+                        title="Close document"
+                        aria-label={`Close ${basename(doc.path)}`}
+                        onClick={() => closeFile(doc.docId)}
+                      >
+                        ✕
                       </button>
                     </li>
                   ))}
@@ -548,6 +597,7 @@ export function App() {
                 <button type="button" class="primary-button" onClick={() => setBrowserOpen(true)}>
                   Open another file…
                 </button>
+                {guideLink}
               </div>
             </div>
           )}
@@ -605,7 +655,14 @@ export function App() {
         </svg>
       </button>
 
-      {browserOpen && <FileBrowser onOpen={openFile} onClose={() => setBrowserOpen(false)} onError={setError} />}
+      {browserOpen && (
+        <FileBrowser
+          initialDir={mode === "document" && state?.path ? dirname(state.path) : undefined}
+          onOpen={openFile}
+          onClose={() => setBrowserOpen(false)}
+          onError={setError}
+        />
+      )}
     </div>
   );
 
@@ -623,6 +680,22 @@ function isFormControl(target: EventTarget | null): boolean {
 
 function basename(path: string): string {
   return path.split("/").pop() || path;
+}
+
+function dirname(path: string): string {
+  const idx = path.lastIndexOf("/");
+  // idx === 0 means a file at the filesystem root ("/doc.html") → parent is "/".
+  return idx > 0 ? path.slice(0, idx) : "/";
+}
+
+// The directory shown under the file name: the file name is already displayed
+// above, so we drop it and show only the folder. We abbreviate $HOME to ~ and
+// split off the last segment so it can stay pinned while the rest middle-truncates.
+function displayDir(path: string): { head: string; tail: string } {
+  const dir = dirname(path).replace(/^(\/Users\/[^/]+|\/home\/[^/]+|\/root)(?=\/|$)/, "~");
+  const idx = dir.lastIndexOf("/");
+  if (idx <= 0) return { head: dir, tail: "" };
+  return { head: dir.slice(0, idx), tail: dir.slice(idx) };
 }
 
 export type { Thread };

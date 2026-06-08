@@ -378,4 +378,16 @@ describe("external change detection", () => {
     expect(state.renderedHtml).toContain("more analytics charts");
     expect(state.threads).toHaveLength(1);
   });
+
+  test("an idle tick on an unchanged file is a no-op (cheap stat path)", async () => {
+    const { docId } = await openDoc();
+    const before = manager.get(docId)!.version;
+    const mtimeBefore = fs.statSync(file).mtimeMs;
+    // Several idle ticks: unchanged mtime+size must not trigger a read, reconcile,
+    // or self-heal write — the version and the file's mtime stay put.
+    manager.checkExternalChanges();
+    manager.checkExternalChanges();
+    expect(manager.get(docId)!.version).toBe(before);
+    expect(fs.statSync(file).mtimeMs).toBe(mtimeBefore);
+  });
 });
