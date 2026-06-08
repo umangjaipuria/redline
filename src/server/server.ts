@@ -27,6 +27,7 @@ import { isDocId } from "./docid";
 import { FileBrowseError, expandPath, listDirectory, pickFileNativeDialog } from "./files";
 import {
   SERVERS_DIR,
+  readServerRecords,
   removeServerRecord,
   serverRecordPath,
   writeServerRecord,
@@ -503,12 +504,30 @@ export function startServer(options: ServerOptions): void {
     serverInfo: () => ({ url: serverUrl, pid: process.pid, startedAt: serverStartedAt, docs: manager.registryDocs() }),
   });
 
-  const server = Bun.serve({
-    hostname: options.host,
-    port: options.port,
-    idleTimeout: 120,
-    fetch: handler,
-  });
+  let server: ReturnType<typeof Bun.serve>;
+  try {
+    server = Bun.serve({
+      hostname: options.host,
+      port: options.port,
+      idleTimeout: 120,
+      fetch: handler,
+    });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === "EADDRINUSE") {
+      const running = readServerRecords(SERVERS_DIR);
+      const here = running.find((r) => r.url.includes(`:${options.port}/`));
+      console.error(`Port ${options.port} is already in use.`);
+      if (here) {
+        console.error(`A Redline server is already running there: ${here.url} (pid ${here.pid}).`);
+        console.error(`Open that URL, or open a file on it with: redline <file>`);
+      } else {
+        console.error(`Another process is using it. Start Redline on a different port:`);
+        console.error(`  bun run start ${options.documentPath ?? "<file>"} --port ${options.port + 1}`);
+      }
+      process.exit(1);
+    }
+    throw error;
+  }
 
   serverUrl = server.url.toString();
   // The API reads/writes files on disk and is unauthenticated by design (the
