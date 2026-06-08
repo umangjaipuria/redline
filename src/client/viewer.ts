@@ -4,7 +4,7 @@
 // resolved quote in the rendered text layer (the shared normalization contract),
 // tracks the live selection for comment capture, and scrolls to a thread.
 
-import { findQuoteMatches, normalizeQuoteKey, type AnchorStatus } from "../core";
+import { findQuoteMatches, normalizeQuoteKey, resolveAnchor, type AnchorStatus } from "../core";
 import type { SelectorInput } from "../shared";
 import { assetsBase } from "./api";
 
@@ -39,6 +39,10 @@ export interface ViewerCallbacks {
   // Fired when the document scrolls or its layout changes, so the rail can
   // re-align comment cards to their anchors.
   onViewportChange?: () => void;
+  // Fired for user input that intends to scroll the document. Programmatic
+  // smooth scrolls still emit onViewportChange, but should not by themselves
+  // reclaim manual rail scrolling.
+  onDocumentUserScroll?: () => void;
   // Cmd/Ctrl+Shift+M pressed while focus is inside the document iframe — the
   // parent window never sees that keydown, so the viewer forwards it.
   onCommentShortcut?: () => void;
@@ -93,6 +97,7 @@ export class DocumentViewer {
         event.preventDefault();
         this.callbacks.onCommentShortcut?.();
       }
+      if (isScrollKey(event.key)) this.callbacks.onDocumentUserScroll?.();
     });
     // Anything that moves an anchor on screen should re-align the rail: the main
     // document scroll, a scroll inside a nested scroller (capture phase, since
@@ -100,9 +105,22 @@ export class DocumentViewer {
     // document/window is created on each load, so these per-load listeners are
     // discarded with it — no accumulation.)
     const notify = () => this.callbacks.onViewportChange?.();
+    const userScrollIntent = () => this.callbacks.onDocumentUserScroll?.();
+    const scrollbarIntent = (event: MouseEvent | PointerEvent) => {
+      const win = this.iframe.contentWindow;
+      if (!win) return;
+      const scrollbarLane = 24;
+      if (event.clientX >= win.innerWidth - scrollbarLane || event.clientY >= win.innerHeight - scrollbarLane) {
+        userScrollIntent();
+      }
+    };
     const win = this.iframe.contentWindow;
+    win?.addEventListener("wheel", userScrollIntent, { passive: true });
+    win?.addEventListener("touchstart", userScrollIntent, { passive: true });
     win?.addEventListener("scroll", notify, { passive: true });
     win?.addEventListener("resize", notify, { passive: true });
+    doc.addEventListener("pointerdown", scrollbarIntent, { capture: true, passive: true });
+    doc.addEventListener("mousedown", scrollbarIntent, { capture: true, passive: true });
     doc.addEventListener("scroll", notify, { capture: true, passive: true });
     doc.fonts?.ready?.then(notify).catch(() => {});
     // Content reflow (images loading, late layout) also shifts anchors.
@@ -220,6 +238,29 @@ export class DocumentViewer {
     el?.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
+  scrollPosition(): { left: number; top: number } | null {
+    const win = this.iframe.contentWindow;
+    if (!win) return null;
+    return { left: win.scrollX, top: win.scrollY };
+  }
+
+  restoreScrollPosition(position: { left: number; top: number } | null): void {
+    const win = this.iframe.contentWindow;
+    if (!win || !position) return;
+    win.scrollTo(position.left, position.top);
+  }
+
+  scrollMetrics(): { clientHeight: number; scrollHeight: number; scrollTop: number } | null {
+    const doc = this.doc();
+    const win = this.iframe.contentWindow;
+    if (!doc?.documentElement || !win) return null;
+    return {
+      clientHeight: win.innerHeight || doc.documentElement.clientHeight,
+      scrollHeight: Math.max(doc.documentElement.scrollHeight, doc.body?.scrollHeight ?? 0),
+      scrollTop: win.scrollY,
+    };
+  }
+
   // The iframe's position in the top-window viewport — added to in-iframe
   // coordinates to translate anchor/selection geometry into window space.
   frameTop(): number {
@@ -241,6 +282,13 @@ export class DocumentViewer {
       }
     }
     return top === Infinity ? null : this.frameTop() + top;
+  }
+
+  anchorDocumentTop(threadId: string): number | null {
+    const metrics = this.scrollMetrics();
+    const viewportTop = this.anchorViewportTop(threadId);
+    if (!metrics || viewportTop === null) return null;
+    return viewportTop - this.frameTop() + metrics.scrollTop;
   }
 
   // The live selection's last rect, in top-window coordinates — used to place
@@ -272,6 +320,43 @@ export class DocumentViewer {
     const rect = rects[0];
     if (!rect) return null;
     return this.frameTop() + rect.top;
+  }
+
+  selectionDocumentTop(): number | null {
+    const metrics = this.scrollMetrics();
+    const viewportTop = this.selectionViewportTop();
+    if (!metrics || viewportTop === null) return null;
+    return viewportTop - this.frameTop() + metrics.scrollTop;
+  }
+
+  // Top-window Y for a saved selection selector. Used after focus has moved out
+  // of the iframe, when the browser may have cleared the live Selection object.
+  selectorViewportTop(selectors: SelectorInput | null): number | null {
+    const index = this.index;
+    if (!index || !selectors?.quote) return null;
+    const start = Number.isFinite(selectors.posStart) ? selectors.posStart! : 0;
+    const resolution = resolveAnchor(index.text, {
+      quote: selectors.quote,
+      prefix: selectors.prefix ?? "",
+      suffix: selectors.suffix ?? "",
+      posStart: start,
+      posEnd: Number.isFinite(selectors.posEnd) ? selectors.posEnd! : start + selectors.quote.length,
+    });
+    if (!resolution.range) return null;
+    const range = this.rangeFor(index, resolution.range.start, resolution.range.end);
+    if (!range) return null;
+    for (const rect of Array.from(range.getClientRects())) {
+      if (rect.width === 0 && rect.height === 0) continue;
+      return this.frameTop() + rect.top;
+    }
+    return null;
+  }
+
+  selectorDocumentTop(selectors: SelectorInput | null): number | null {
+    const metrics = this.scrollMetrics();
+    const viewportTop = this.selectorViewportTop(selectors);
+    if (!metrics || viewportTop === null) return null;
+    return viewportTop - this.frameTop() + metrics.scrollTop;
   }
 
   // The DOM order of currently-painted highlights — drives rail ordering so the
@@ -413,6 +498,11 @@ export class DocumentViewer {
     const firstText = firstTextNode(container);
     return firstText ? (index.nodeStart.get(firstText) ?? null) : null;
   }
+}
+
+function isScrollKey(key: string): boolean {
+  return key === "ArrowDown" || key === "ArrowUp" || key === "PageDown" || key === "PageUp" ||
+    key === "Home" || key === "End" || key === " " || key === "Spacebar";
 }
 
 // Highlight decoration styles, injected into the (sandboxed) document so the

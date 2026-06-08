@@ -11,7 +11,16 @@ export function renderHtml(raw: string): RenderedView {
 
   // Remove the inert Redline state script (it should never be visible/parsed in
   // the view) and any other scripts.
+  html = html.replace(
+    /[ \t]*<script\b(?=[^>]*\bid\s*=\s*(["'])redline-state\1)(?=[^>]*\btype\s*=\s*(["'])application\/json\2)[^>]*>[\s\S]*?<\/script>[ \t]*(?:\r?\n)?/gi,
+    "",
+  );
   html = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "");
+  // The agent discovery marker is Redline-owned metadata, not author content.
+  // Keeping it out of the iframe prevents state-only writes from forcing a
+  // document reload just because the marker was added or removed.
+  html = html.replace(/[ \t]*<meta\b(?=[^>]*\bname\s*=\s*(["'])redline-agent-guide\1)[^>]*>[ \t]*(?:\r?\n)?/gi, "");
+  html = html.replace(/[ \t]*<!--\s*redline-agent-guide:[\s\S]*?-->\s*/gi, "");
   // Drop inline event handlers (on*="..."/on*='...'/on*=value).
   html = html.replace(/\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "");
   // Neutralize javascript:/vbscript: URLs in href/src.

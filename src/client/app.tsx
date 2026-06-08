@@ -7,7 +7,15 @@ import { FileBrowser } from "./file-browser";
 import { pushRecentFolder } from "./recent";
 import { Rail } from "./rail";
 import { BrandMark, FolderIcon, OpenIcon, PersonIcon, ChevronLeftIcon, ChevronRightIcon, RailIcon } from "./icons";
-import { commentNavigationState, commentNavigationTarget, composerInsertIndex, stackedRailItemLayout } from "./layout";
+import {
+  centeredRailScrollTop,
+  commentNavigationState,
+  commentNavigationTarget,
+  composerInsertIndex,
+  documentSyncedRailContentHeight,
+  documentSyncedRailScrollTop,
+  stackedRailItemLayout,
+} from "./layout";
 
 type Mode = "loading" | "empty" | "switcher" | "document";
 
@@ -43,6 +51,9 @@ export function App() {
   const beginCommentRef = useRef<() => void>(() => {});
   const fabRef = useRef<HTMLButtonElement | null>(null);
   const railRevealAnimationRef = useRef<number | null>(null);
+  const railRevealGenerationRef = useRef(0);
+  const railManualScrollRef = useRef(false);
+  const skipNextActiveThreadDocumentScrollRef = useRef<Set<string>>(new Set());
 
   activeThreadRef.current = activeThread;
   selectionRef.current = selection;
@@ -53,7 +64,24 @@ export function App() {
     localStorage.setItem("redline.railCollapsed", collapsed ? "1" : "0");
   }, []);
 
-  const animateRailScrollTo = useCallback((rail: HTMLElement, targetTop: number) => {
+  const cancelRailRevealAnimation = useCallback(() => {
+    if (railRevealAnimationRef.current !== null) {
+      cancelAnimationFrame(railRevealAnimationRef.current);
+      railRevealAnimationRef.current = null;
+    }
+    railRevealGenerationRef.current += 1;
+  }, []);
+
+  const markRailManualScroll = useCallback(() => {
+    railManualScrollRef.current = true;
+    cancelRailRevealAnimation();
+  }, [cancelRailRevealAnimation]);
+
+  const resumeRailSync = useCallback(() => {
+    railManualScrollRef.current = false;
+  }, []);
+
+  const animateRailScrollTo = useCallback((rail: HTMLElement, targetTop: number, generation: number) => {
     if (railRevealAnimationRef.current !== null) {
       cancelAnimationFrame(railRevealAnimationRef.current);
       railRevealAnimationRef.current = null;
@@ -61,13 +89,19 @@ export function App() {
     const startTop = rail.scrollTop;
     const distance = targetTop - startTop;
     if (Math.abs(distance) < 1) {
-      rail.scrollTop = targetTop;
+      if (railRevealGenerationRef.current === generation && !railManualScrollRef.current) {
+        rail.scrollTop = targetTop;
+      }
       return;
     }
 
     const startedAt = performance.now();
     const duration = 280;
     const step = (now: number) => {
+      if (railRevealGenerationRef.current !== generation || railManualScrollRef.current) {
+        railRevealAnimationRef.current = null;
+        return;
+      }
       const progress = Math.min(1, (now - startedAt) / duration);
       const eased = 1 - Math.pow(1 - progress, 3);
       rail.scrollTop = startTop + distance * eased;
@@ -81,16 +115,30 @@ export function App() {
     railRevealAnimationRef.current = requestAnimationFrame(step);
   }, []);
 
-  const revealThreadCardInRail = useCallback((id: string) => {
+  const revealRailElement = useCallback((selector: string) => {
+    railManualScrollRef.current = false;
+    if (railRevealAnimationRef.current !== null) {
+      cancelAnimationFrame(railRevealAnimationRef.current);
+      railRevealAnimationRef.current = null;
+    }
+    railRevealGenerationRef.current += 1;
+    const generation = railRevealGenerationRef.current;
     const reveal = () => {
+      if (railRevealGenerationRef.current !== generation || railManualScrollRef.current) return;
       const rail = document.querySelector(".comment-rail") as HTMLElement | null;
-      const el = document.querySelector(`.thread-card[data-thread-id="${CSS.escape(id)}"]`) as HTMLElement | null;
+      const el = document.querySelector(selector) as HTMLElement | null;
       if (!rail || !el) return;
       const railRect = rail.getBoundingClientRect();
       const elRect = el.getBoundingClientRect();
-      const centeredTop = rail.scrollTop + (elRect.top - railRect.top) - (rail.clientHeight - el.offsetHeight) / 2;
       const maxTop = Math.max(0, rail.scrollHeight - rail.clientHeight);
-      animateRailScrollTo(rail, Math.max(0, Math.min(centeredTop, maxTop)));
+      animateRailScrollTo(rail, centeredRailScrollTop({
+        itemHeight: el.offsetHeight,
+        itemViewportTop: elRect.top,
+        maxScrollTop: maxTop,
+        railClientHeight: rail.clientHeight,
+        railScrollTop: rail.scrollTop,
+        railViewportTop: railRect.top,
+      }), generation);
     };
     reveal();
     requestAnimationFrame(reveal);
@@ -98,14 +146,23 @@ export function App() {
     window.setTimeout(reveal, 420);
   }, [animateRailScrollTo]);
 
+  const revealThreadCardInRail = useCallback((id: string) => {
+    revealRailElement(`.thread-card[data-thread-id="${CSS.escape(id)}"]`);
+  }, [revealRailElement]);
+
+  const revealComposerInRail = useCallback(() => {
+    revealRailElement(".composer");
+  }, [revealRailElement]);
+
   const selectThreadFromHighlight = useCallback(
     (threadId: string | null) => {
       setActiveThread(threadId);
       if (!threadId) return;
+      resumeRailSync();
       setRailCollapsed(false);
       revealThreadCardInRail(threadId);
     },
-    [revealThreadCardInRail, setRailCollapsed],
+    [resumeRailSync, revealThreadCardInRail, setRailCollapsed],
   );
 
   // Create the imperative viewer once the iframe element exists.
@@ -115,9 +172,10 @@ export function App() {
       onSelection: (selectors) => setSelection(selectors),
       onHighlightClick: selectThreadFromHighlight,
       onViewportChange: () => onViewportRef.current(),
+      onDocumentUserScroll: () => resumeRailSync(),
       onCommentShortcut: () => beginCommentRef.current(),
     });
-  }, [mode, selectThreadFromHighlight]);
+  }, [mode, resumeRailSync, selectThreadFromHighlight]);
 
   const refreshFrom = useCallback((next: DocumentStateResponse) => {
     setState(next);
@@ -127,9 +185,19 @@ export function App() {
     const viewer = viewerRef.current;
     if (!viewer) return;
     if (next.renderedHtml !== lastRenderedRef.current) {
+      const previousRendered = lastRenderedRef.current;
+      const scrollPosition =
+        previousRendered && activeDocRef.current === next.docId ? viewer.scrollPosition() : null;
       lastRenderedRef.current = next.renderedHtml;
       viewer.load(next.docId, next.renderedHtml).then(() => {
         viewer.applyHighlights(next.anchors, activeThreadRef.current);
+        if (scrollPosition) {
+          viewer.restoreScrollPosition(scrollPosition);
+          requestAnimationFrame(() => {
+            viewer.restoreScrollPosition(scrollPosition);
+            onViewportRef.current();
+          });
+        }
         setOrder(viewer.highlightOrder());
       });
     } else {
@@ -263,17 +331,16 @@ export function App() {
     viewerRef.current?.setActiveHighlight(activeThread);
     if (!activeThread) return;
     const id = activeThread;
-    viewerRef.current?.scrollToThread(id);
+    const skipDocumentScroll = skipNextActiveThreadDocumentScrollRef.current.delete(id);
+    if (!skipDocumentScroll) viewerRef.current?.scrollToThread(id);
     revealThreadCardInRail(id);
   }, [activeThread, revealThreadCardInRail]);
 
   // When the composer opens, scroll the rail so it is visible.
   useEffect(() => {
     if (!composerOpen) return;
-    requestAnimationFrame(() => {
-      (document.querySelector(".composer") as HTMLElement | null)?.scrollIntoView({ block: "center", behavior: "smooth" });
-    });
-  }, [composerOpen]);
+    revealComposerInRail();
+  }, [composerOpen, revealComposerInRail]);
 
   const onAuthorChange = (value: string) => {
     setAuthor(value);
@@ -327,11 +394,12 @@ export function App() {
   const beginComment = useCallback(() => {
     const sel = selectionRef.current;
     if (!sel) return;
+    resumeRailSync();
     setComposerSelection(sel);
     setComposerOpen(true);
     setRailCollapsed(false);
     if (fabRef.current) fabRef.current.hidden = true;
-  }, [setRailCollapsed]);
+  }, [resumeRailSync, setRailCollapsed]);
 
   beginCommentRef.current = beginComment;
 
@@ -409,39 +477,53 @@ export function App() {
     }
     inner.classList.add("rail-aligned");
     const railTop = rail.getBoundingClientRect().top;
+    const frameOffset = viewer.frameTop() - railTop;
+    const scrollMetrics = viewer.scrollMetrics();
+    const railTargetTop = (documentTop: number | null) =>
+      documentTop === null ? null : documentTop + frameOffset;
     const composerEl = composerOpenRef.current ? (inner.querySelector(".composer") as HTMLElement | null) : null;
     // Cards in document order (the order Rail renders them), each with its
-    // anchor's current viewport position.
+    // anchor's stable document position translated into rail scroll space.
     const entries = Array.from(inner.querySelectorAll<HTMLElement>(".thread-card[data-thread-id]")).map((el) => {
       const id = el.getAttribute("data-thread-id")!;
-      return { id, el, height: el.offsetHeight, targetViewportTop: viewer.anchorViewportTop(id) };
+      return { id, el, height: el.offsetHeight, targetViewportTop: railTargetTop(viewer.anchorDocumentTop(id)) };
     });
     // Splice the composer into its document position by selection location, so a
     // new comment never jumps ahead of an earlier comment scrolled out of view.
     if (composerEl) {
-      const composerTarget = viewer.selectionViewportTop();
+      const composerTarget = railTargetTop(
+        viewer.selectorDocumentTop(composerSelection) ?? viewer.selectionDocumentTop(),
+      );
       const at = composerInsertIndex(entries.map((e) => e.targetViewportTop), composerTarget);
       entries.splice(at, 0, { id: "__composer__", el: composerEl, height: composerEl.offsetHeight, targetViewportTop: composerTarget });
     }
-    // No active pinning, and railScrollTop fixed at 0: cards pack top-to-bottom in
-    // document order at NON-NEGATIVE positions, so every card is reachable by
-    // scrolling the rail (pinning the active card pushed earlier cards to negative
-    // positions a scroll container can't reach). Positions are stable regardless of
-    // manual rail scroll. When the document scrolls past earlier anchors, the
-    // layout shifts the stack down so it stays reachable; applying the same shift
-    // to rail.scrollTop preserves visual alignment, so comments enter the rail as
-    // their anchors enter the document viewport.
+    // Cards are laid out in document coordinates, then the rail mirrors the
+    // document's scrollTop. That keeps the rail scrollbar range stable during a
+    // smooth document jump; viewport-relative positions would collapse the rail
+    // height as the target anchor enters view.
     const { positions, contentHeight, positionShift } = stackedRailItemLayout({
       items: entries.map((e) => ({ id: e.id, height: e.height, targetViewportTop: e.targetViewportTop })),
       railScrollTop: 0,
-      railViewportTop: railTop,
+      railViewportTop: 0,
     });
     for (const e of entries) {
       const top = positions.get(e.id);
       e.el.style.top = top === undefined ? "" : `${Math.round(top)}px`;
     }
-    inner.style.height = `${Math.round(contentHeight)}px`;
-    rail.scrollTop = positionShift;
+    const syncedContentHeight = documentSyncedRailContentHeight({
+      contentHeight,
+      documentClientHeight: scrollMetrics?.clientHeight,
+      documentScrollHeight: scrollMetrics?.scrollHeight,
+      railClientHeight: rail.clientHeight,
+    });
+    inner.style.height = `${Math.round(syncedContentHeight)}px`;
+    const nextRailScrollTop = documentSyncedRailScrollTop({
+      currentRailScrollTop: rail.scrollTop,
+      documentScrollTop: scrollMetrics?.scrollTop,
+      fallbackScrollTop: positionShift,
+      manualOverride: railManualScrollRef.current,
+    });
+    if (Math.abs(rail.scrollTop - nextRailScrollTop) >= 1) rail.scrollTop = nextRailScrollTop;
   };
   // Imperatively position/hide the floating comment button (no re-render on
   // scroll). Lives on the same viewport-change path as the rail layout so the
@@ -476,7 +558,8 @@ export function App() {
   });
 
   // Re-align on window resize. Document scroll comes through the viewer's
-  // onViewportChange; rail scroll comes through the Rail's onScroll prop.
+  // onViewportChange; manual rail scroll is tracked by Rail input events so
+  // passive layout work does not snap the rail back to the document position.
   useEffect(() => {
     const onResize = () => onViewportRef.current();
     window.addEventListener("resize", onResize);
@@ -498,7 +581,22 @@ export function App() {
     setComposerSelection(null);
     setSelection(null);
     const created = next.threads.find((t) => !prev.has(t.id));
-    if (created) setActiveThread(created.id);
+    if (created) {
+      skipNextActiveThreadDocumentScrollRef.current.add(created.id);
+      setActiveThread(created.id);
+    }
+  };
+
+  const deleteThread = async (threadId: string) => {
+    if (!docId || !state) return;
+    const wasActive = activeThreadRef.current === threadId;
+    if (wasActive) setActiveThread(null);
+    try {
+      await withWrite(() => api.deleteThread(docId, threadId, state.version));
+    } catch (error) {
+      if (wasActive) setActiveThread(threadId);
+      throw error;
+    }
   };
 
   const guideLink = howtoPath ? (
@@ -675,13 +773,17 @@ export function App() {
             selection={selection}
             composerOpen={composerOpen}
             onDeselect={() => setActiveThread(null)}
-            onSelectThread={(id) => setActiveThread(id)}
+            onManualScroll={markRailManualScroll}
+            onSelectThread={(id) => {
+              resumeRailSync();
+              setActiveThread(id);
+            }}
             onCreateComment={createComment}
             onCancelComposer={cancelComposer}
             onReply={(threadId, text) => withWrite(() => api.reply(docId, threadId, text, author, state.version))}
             onEdit={(threadId, messageId, text) => withWrite(() => api.editMessage(docId, threadId, messageId, text, state.version))}
             onDeleteReply={(threadId, messageId) => withWrite(() => api.deleteReply(docId, threadId, messageId, state.version))}
-            onDeleteThread={(threadId) => withWrite(() => api.deleteThread(docId, threadId, state.version))}
+            onDeleteThread={deleteThread}
             onReanchor={(threadId) =>
               selection
                 ? withWrite(() => api.reanchor(docId, threadId, selection.quote, undefined, state.version)).then(() =>
@@ -722,7 +824,10 @@ export function App() {
 
   function jump(direction: "next" | "previous") {
     const target = commentNavigationTarget(railOrderIds, activeThreadRef.current, direction);
-    if (target) setActiveThread(target);
+    if (target) {
+      resumeRailSync();
+      setActiveThread(target);
+    }
   }
 }
 

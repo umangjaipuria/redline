@@ -53,6 +53,13 @@ describe("render", () => {
     expect(view.html).toContain("The quick brown fox");
   });
 
+  test("strips Redline metadata so state-only writes do not change the iframe document", () => {
+    const withReviewState = htmlAdapter.writeState(DOC, stateWith(1));
+    const withEmptyState = htmlAdapter.writeState(withReviewState, emptyState());
+    expect(htmlAdapter.render(withReviewState).html).toBe(htmlAdapter.render(withEmptyState).html);
+    expect(htmlAdapter.render(withReviewState).html).not.toContain("redline-agent-guide");
+  });
+
   test("removes inline event handlers and javascript: urls", () => {
     const dirty = `<body><a href="javascript:alert(1)" onclick="steal()">x</a></body>`;
     const view = htmlAdapter.render(dirty);

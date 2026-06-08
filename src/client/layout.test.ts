@@ -1,9 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import {
   alignedRailItemTop,
+  centeredRailScrollTop,
   commentNavigationState,
   commentNavigationTarget,
   composerInsertIndex,
+  documentSyncedRailContentHeight,
+  documentSyncedRailScrollTop,
   stackedRailItemLayout,
 } from "./layout";
 
@@ -16,6 +19,87 @@ describe("alignedRailItemTop", () => {
   });
   test("clamps a negative rail scroll to zero", () => {
     expect(alignedRailItemTop({ railScrollTop: -10, railViewportTop: 0, targetViewportTop: 30 })).toBe(30);
+  });
+});
+
+describe("centeredRailScrollTop", () => {
+  test("centers a deep composer by scrolling only the rail", () => {
+    expect(centeredRailScrollTop({
+      itemHeight: 140,
+      itemViewportTop: 720,
+      maxScrollTop: 900,
+      railClientHeight: 620,
+      railScrollTop: 0,
+      railViewportTop: 52,
+    })).toBe(428);
+  });
+
+  test("clamps to the rail's own scroll range", () => {
+    expect(centeredRailScrollTop({
+      itemHeight: 120,
+      itemViewportTop: 40,
+      maxScrollTop: 500,
+      railClientHeight: 600,
+      railScrollTop: 0,
+      railViewportTop: 52,
+    })).toBe(0);
+    expect(centeredRailScrollTop({
+      itemHeight: 120,
+      itemViewportTop: 1200,
+      maxScrollTop: 500,
+      railClientHeight: 600,
+      railScrollTop: 0,
+      railViewportTop: 52,
+    })).toBe(500);
+  });
+});
+
+describe("documentSyncedRailContentHeight", () => {
+  test("keeps the rail scroll range tied to the document during comment jumps", () => {
+    const documentRange = {
+      documentClientHeight: 800,
+      documentScrollHeight: 6200,
+      railClientHeight: 700,
+    };
+    const beforeJump = documentSyncedRailContentHeight({ ...documentRange, contentHeight: 5200 });
+    const afterAnchorIsVisible = documentSyncedRailContentHeight({ ...documentRange, contentHeight: 420 });
+    expect(beforeJump).toBe(6100);
+    expect(afterAnchorIsVisible).toBe(6100);
+  });
+
+  test("still grows to fit comments outside the document scroll range", () => {
+    expect(documentSyncedRailContentHeight({
+      contentHeight: 8000,
+      documentClientHeight: 800,
+      documentScrollHeight: 6200,
+      railClientHeight: 700,
+    })).toBe(8000);
+  });
+});
+
+describe("documentSyncedRailScrollTop", () => {
+  test("mirrors the document scroll position during automatic sync", () => {
+    expect(documentSyncedRailScrollTop({
+      currentRailScrollTop: 120,
+      documentScrollTop: 840,
+      fallbackScrollTop: 40,
+    })).toBe(840);
+  });
+
+  test("preserves manual rail scroll during passive layout updates", () => {
+    expect(documentSyncedRailScrollTop({
+      currentRailScrollTop: 120,
+      documentScrollTop: 840,
+      fallbackScrollTop: 40,
+      manualOverride: true,
+    })).toBe(120);
+  });
+
+  test("uses the layout fallback when document metrics are unavailable", () => {
+    expect(documentSyncedRailScrollTop({
+      currentRailScrollTop: 120,
+      fallbackScrollTop: 40,
+    })).toBe(40);
   });
 });
 
@@ -105,6 +189,20 @@ describe("stackedRailItemLayout", () => {
     });
     expect(positions.get("a")).toBe(0);
     expect(positions.get("b")).toBe(112);
+  });
+
+  test("a new-file composer keeps its selected-text target instead of defaulting to the rail top", () => {
+    const { positions, positionShift } = stackedRailItemLayout({
+      edgePadding: 16,
+      gap: 12,
+      railViewportTop: 52,
+      railScrollTop: 0,
+      items: [
+        { id: "__composer__", height: 140, targetViewportTop: 720 },
+      ],
+    });
+    expect(positions.get("__composer__")).toBe(668);
+    expect(positionShift).toBe(0);
   });
 });
 

@@ -31,6 +31,54 @@ export function alignedRailItemTop(opts: {
   return railScrollTop + finite(opts.targetViewportTop ?? railViewportTop, railViewportTop) - railViewportTop;
 }
 
+// Center one rail item inside the rail's own scroll container. This intentionally
+// returns a scrollTop for the rail only; callers should not use DOM
+// scrollIntoView(), which may scroll unrelated ancestors.
+export function centeredRailScrollTop(opts: {
+  itemHeight?: number;
+  itemViewportTop?: number;
+  maxScrollTop?: number;
+  railClientHeight?: number;
+  railScrollTop?: number;
+  railViewportTop?: number;
+}): number {
+  const railScrollTop = Math.max(0, finite(opts.railScrollTop ?? 0, 0));
+  const railViewportTop = finite(opts.railViewportTop ?? 0, 0);
+  const itemViewportTop = finite(opts.itemViewportTop ?? railViewportTop, railViewportTop);
+  const railClientHeight = Math.max(0, finite(opts.railClientHeight ?? 0, 0));
+  const itemHeight = Math.max(0, finite(opts.itemHeight ?? 0, 0));
+  const maxScrollTop = Math.max(0, finite(opts.maxScrollTop ?? 0, 0));
+  const centered =
+    railScrollTop + (itemViewportTop - railViewportTop) - (railClientHeight - itemHeight) / 2;
+  return Math.max(0, Math.min(centered, maxScrollTop));
+}
+
+export function documentSyncedRailContentHeight(opts: {
+  contentHeight?: number;
+  documentClientHeight?: number;
+  documentScrollHeight?: number;
+  railClientHeight?: number;
+}): number {
+  const contentHeight = Math.max(0, finite(opts.contentHeight ?? 0, 0));
+  const documentScrollHeight = Math.max(0, finite(opts.documentScrollHeight ?? 0, 0));
+  const documentClientHeight = Math.max(0, finite(opts.documentClientHeight ?? 0, 0));
+  const railClientHeight = Math.max(0, finite(opts.railClientHeight ?? 0, 0));
+  const documentMaxScrollTop = Math.max(0, documentScrollHeight - documentClientHeight);
+  return Math.max(contentHeight, documentMaxScrollTop + railClientHeight);
+}
+
+export function documentSyncedRailScrollTop(opts: {
+  currentRailScrollTop?: number;
+  documentScrollTop?: number;
+  fallbackScrollTop?: number;
+  manualOverride?: boolean;
+}): number {
+  const currentRailScrollTop = Math.max(0, finite(opts.currentRailScrollTop ?? 0, 0));
+  if (opts.manualOverride) return currentRailScrollTop;
+  const fallbackScrollTop = Math.max(0, finite(opts.fallbackScrollTop ?? 0, 0));
+  return Math.max(0, finite(opts.documentScrollTop ?? fallbackScrollTop, fallbackScrollTop));
+}
+
 // Place every card as close as possible to its desired (anchor-aligned) top
 // without overlapping, biasing around the active card so the focused comment
 // keeps its exact alignment and its neighbours flow off it.

@@ -11,6 +11,7 @@ interface RailProps {
   selection: SelectorInput | null;
   composerOpen: boolean;
   onDeselect: () => void;
+  onManualScroll: () => void;
   onSelectThread: (id: string) => void;
   onCreateComment: (text: string) => Promise<unknown>;
   onCancelComposer: () => void;
@@ -38,6 +39,12 @@ export function Rail(props: RailProps) {
     <aside
       class="comment-rail"
       aria-label="Comment threads"
+      onWheel={props.onManualScroll}
+      onPointerDown={props.onManualScroll}
+      onTouchStart={props.onManualScroll}
+      onKeyDown={(e) => {
+        if (isScrollKey(e.key)) props.onManualScroll();
+      }}
       onClick={(e) => {
         // A click on the rail background (not a card or the composer) clears the
         // active thread.
@@ -61,6 +68,11 @@ export function Rail(props: RailProps) {
       </div>
     </aside>
   );
+}
+
+function isScrollKey(key: string): boolean {
+  return key === "ArrowDown" || key === "ArrowUp" || key === "PageDown" || key === "PageUp" ||
+    key === "Home" || key === "End" || key === " ";
 }
 
 function Composer(props: { onCreate: (text: string) => Promise<unknown>; onCancel: () => void }) {

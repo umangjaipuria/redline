@@ -41,9 +41,9 @@
 39. When an anchor enters the document viewport, its comment should be able to enter the visible rail area.
 40. Manual scrolling in the comment rail should not scroll the main document.
 41. Manual scrolling in the comment rail should not deactivate the active thread.
-42. Manual scrolling in the comment rail should allow the user to inspect comments away from the active thread.
-43. After manually scrolling away from the active comment, clicking the active anchor should scroll the rail back to that comment.
-44. Programmatic previous/next comment navigation should move the document and rail together.
+42. Manual scrolling in the comment rail should allow the user to inspect comments away from the active thread without late layout, repaint, or scheduled reveal work snapping the rail back.
+43. After manually scrolling away from the active comment, an explicit anchor, comment, or previous/next navigation action should scroll the rail back to that comment.
+44. Programmatic previous/next comment navigation should move the document and rail together without rail jumps or rail scroll-range changes.
 45. Previous/next navigation should select the first comment when no comment is active.
 46. Previous navigation should be disabled at the first comment.
 47. Next navigation should be disabled at the last comment.
@@ -62,12 +62,12 @@
 60. The composer should submit on the standard keyboard submit shortcut.
 61. The composer should close on Escape.
 62. The composer should not submit an empty comment.
-63. Opening the composer should reopen the comment rail if needed.
-64. The composer should appear in document order near the selected text.
+63. Opening the composer should reopen the comment rail if needed without scrolling the reviewed document away from the selected text.
+64. The composer should appear in document order near the selected text, even after focus moves from the document to the composer.
 65. A composer for a selection below existing comments should appear after those comments.
 66. A composer for a selection above existing comments should appear before those comments.
 67. A composer should appear before orphaned comments.
-68. Posting a composer comment should close the composer and clear the selection.
+68. Posting a composer comment, including the first comment in a document, should close the composer, clear the selection, and keep the reviewed document at the current scroll position.
 69. Cancelling a composer should close it without creating a thread.
 70. Reply controls should activate the thread before opening or closing the reply box.
 71. A reply box should focus its text box when it opens.
@@ -89,7 +89,7 @@
 87. The original message of a thread should not be deletable as a reply.
 88. Deleting a thread should remove the whole thread, including replies in the thread.
 89. Deleting the last thread should remove the stored review state from the document.
-90. Deleting a thread should remove its highlight from the document view.
+90. Deleting a thread, including the last thread in a document, should remove its highlight from the document view without changing the reviewed document scroll position.
 91. An anchor that still matches exactly should be shown as anchored.
 92. An anchor that shifts because of edits elsewhere should remain anchored.
 93. A lightly edited anchor should be able to heal to the edited text.
