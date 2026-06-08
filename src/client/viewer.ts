@@ -80,12 +80,13 @@ export class DocumentViewer {
     doc.addEventListener("mouseup", () => this.emitSelection());
     doc.addEventListener("keyup", () => this.emitSelection());
     doc.addEventListener("click", (event) => {
-      const target = event.target as HTMLElement | null;
+      const target = hasClosest(event.target) ? event.target : null;
       const highlight = target?.closest?.(".redline-highlight[data-thread-id]") as HTMLElement | null;
       const threadId = highlight?.getAttribute("data-thread-id") ?? null;
       // Clicking a highlight activates its thread; clicking elsewhere in the
       // document deactivates the current one.
       this.callbacks.onHighlightClick(threadId);
+      this.handleLocalFragmentClick(doc, target, event);
     });
     doc.addEventListener("keydown", (event) => {
       if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "m") {
@@ -150,6 +151,22 @@ export class DocumentViewer {
       node = walker.nextNode() as Text | null;
     }
     this.index = { text, chars, nodeStart };
+  }
+
+  private handleLocalFragmentClick(doc: Document, target: Element | null, event: MouseEvent): void {
+    const link = target?.closest?.("a[href]") as HTMLAnchorElement | null;
+    const fragment = localFragmentFromHref(link?.getAttribute("href") ?? null);
+    if (fragment === null) return;
+
+    event.preventDefault();
+    if (fragment === "") {
+      doc.defaultView?.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+
+    const named = doc.getElementsByName(fragment)[0];
+    const destination = doc.getElementById(fragment) ?? named ?? null;
+    destination?.scrollIntoView({ block: "start", behavior: "smooth" });
   }
 
   // Paint highlights for the resolved anchors. Each anchored / needs-review
@@ -457,6 +474,20 @@ export function injectBase(html: string, base: string): string {
 
   const head = `${buildCsp(assetSource)}<base href="${base}">${HIGHLIGHT_STYLE}${headInner}`;
   return `<!doctype html><html><head>${head}</head><body${bodyAttrs}>${bodyInner}</body></html>`;
+}
+
+export function localFragmentFromHref(rawHref: string | null): string | null {
+  if (!rawHref?.startsWith("#")) return null;
+  const rawFragment = rawHref.slice(1);
+  try {
+    return decodeURIComponent(rawFragment);
+  } catch {
+    return rawFragment;
+  }
+}
+
+function hasClosest(target: EventTarget | null): target is Element {
+  return typeof (target as Element | null)?.closest === "function";
 }
 
 // The absolute, path-scoped source for this document's assets, e.g.

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { injectBase } from "./viewer";
+import { injectBase, localFragmentFromHref } from "./viewer";
 
 // injectBase reconstructs untrusted HTML into a shell whose first parsed token is
 // Redline's CSP. These lock that the CSP comes first and that no author content
@@ -61,5 +61,20 @@ describe("injectBase reconstruction", () => {
     expect(out).toContain(`img-src ${BASE}`);
     expect(out).not.toContain("img-src 'self'");
     expect(out).toContain("script-src 'none'");
+  });
+});
+
+describe("localFragmentFromHref", () => {
+  test("keeps raw same-document hash links local despite the injected base tag", () => {
+    expect(localFragmentFromHref("#m0")).toBe("m0");
+    expect(localFragmentFromHref("#")).toBe("");
+    expect(localFragmentFromHref("#a%20b")).toBe("a b");
+  });
+
+  test("ignores links that are not raw same-document fragments", () => {
+    expect(localFragmentFromHref(null)).toBeNull();
+    expect(localFragmentFromHref("m0")).toBeNull();
+    expect(localFragmentFromHref("/api/docs/doc_x/assets/#m0")).toBeNull();
+    expect(localFragmentFromHref("https://example.com/#m0")).toBeNull();
   });
 });
