@@ -39,9 +39,10 @@ Redline is a local app that opens an agent-written HTML document in your browser
 
    For Codex or another agent, point it at this repo's `AGENTS.md`, which carries the same guidance.
 
-5. **Open a document.** Pass any HTML file; Redline serves it and prints a localhost URL to open in your browser.
+5. **Build the web client, then open a document.** The browser UI is bundled into `dist/` (gitignored), so build it once after cloning. Then pass any HTML file; Redline serves it and prints a localhost URL to open in your browser.
 
    ```bash
+   bun run build:client
    bun run start documents/howto.html
    ```
 
@@ -66,6 +67,34 @@ Redline is a local app that opens an agent-written HTML document in your browser
 7. **Ask your agent to review the comments.** Tell Claude (or whichever agent wrote the doc) to review the open comments using the **redline-review** skill. It reads the threads, revises the document, replies to each thread with what changed, and resolves the ones that are done. The skill tells the agent how to find the running Redline instance on its own; if it can't, just give it the localhost URL the server printed.
 
 8. **Iterate.** Agent edits show up live in the open browser. Read the replies, leave new comments, and go again until the document is right. The agent doesn't watch for new comments on its own, so each time you finish a round of comments, tell it to review them again.
+
+## Building and running
+
+Redline needs only [Bun](https://bun.sh) ≥ 1.3 — no other toolchain. Bun runs the
+TypeScript server and CLI directly; the only thing that gets built is the browser
+client, which Bun bundles to `dist/`.
+
+```bash
+bun install                          # install dependencies (Preact)
+bun run build:client                 # bundle the web client into dist/ (required before first run)
+bun run start documents/howto.html   # start the review server; prints a localhost URL (default :7331)
+```
+
+| Command | What it does |
+| --- | --- |
+| `bun run build:client` | Bundle the Preact client (`src/client`) to `dist/`. `dist/` is gitignored, so run this once after cloning and again whenever you change client code. |
+| `bun run start [file] [--port N] [--host H]` | Start the server. With a file it opens that document; with none, the browser prompts you to pick one. Binds to `127.0.0.1` by default; binding elsewhere needs `REDLINE_ALLOW_REMOTE=1` because the local API is unauthenticated. |
+| `bun run dev` | Start the server with `--watch` (auto-restart on server-code changes). The client bundle is not watched — re-run `build:client` after client edits. |
+| `bun src/agent/cli.ts <command>` | The `redline` CLI (see [How agents talk to Redline](#how-agents-talk-to-redline)). Run `bun link` once to expose it globally as `redline`. |
+| `bun test` | Run the test suite. |
+| `bun run check` | Typecheck (`tsc --noEmit`) and run the tests. |
+| `bun run build:binary` | Compile a standalone server executable to `./redline` via `bun build --compile`. |
+
+Notes:
+
+- **Build the client before running.** The server serves the UI from `dist/`; if you skip `build:client`, the browser page comes up blank. `bun run dev` watches server code only — rebuild the client by hand after editing anything under `src/client`.
+- **`build:binary` is experimental.** It compiles the server into a single executable, but the web client and fonts are not yet embedded in the binary, so the full browser UI still needs `dist/` and `public/` alongside it. The HTTP API and CLI work from the binary as-is. For the complete experience, run from source.
+- **Run the CLI** either as `bun src/agent/cli.ts <command>` or, after `bun link`, as `redline <command>`. Every command takes a file path; it routes through a running server automatically when one has the file open, and otherwise edits the file directly.
 
 ## How review state lives in the file
 
