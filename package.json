@@ -9,7 +9,7 @@
   },
   "scripts": {
     "start": "bun src/server/server.ts",
-    "dev": "bun --watch src/server/server.ts",
+    "dev": "bun src/dev.ts",
     "build:client": "bun src/client/build.ts",
     "build:binary": "bun build --compile --outfile redline src/server/server.ts",
     "redline": "bun src/agent/cli.ts",

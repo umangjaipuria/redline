@@ -11,6 +11,7 @@ export interface RailItem {
 
 export interface RailLayout {
   contentHeight: number;
+  positionShift: number;
   positions: Map<string, number>;
 }
 
@@ -49,7 +50,7 @@ export function stackedRailItemLayout(opts: {
     targetViewportTop: item.targetViewportTop === null ? null : finite(item.targetViewportTop, NaN),
   }));
   const positions = new Map<string, number>();
-  if (items.length === 0) return { contentHeight: 0, positions };
+  if (items.length === 0) return { contentHeight: 0, positionShift: 0, positions };
 
   const fallbackTops: number[] = [];
   let fallbackTop = edgePadding;
@@ -98,13 +99,25 @@ export function stackedRailItemLayout(opts: {
     );
   }
 
+  // A document anchor can sit far above the iframe viewport after the user jumps
+  // to a later comment. That produces negative desired rail tops; because a
+  // scroll container cannot scroll above 0, those cards would become unreachable.
+  // Preserve the packed distances, but shift the whole stack back into the
+  // scrollable range.
+  const minTop = Math.min(...Array.from(positions.values()));
+  let positionShift = 0;
+  if (Number.isFinite(minTop) && minTop < 0) {
+    positionShift = -minTop;
+    for (const [id, top] of positions) positions.set(id, top + positionShift);
+  }
+
   let contentHeight = edgePadding;
   for (const item of items) {
     const top = positions.get(item.id);
     if (top === undefined || !Number.isFinite(top)) continue;
     contentHeight = Math.max(contentHeight, top + item.height + edgePadding);
   }
-  return { contentHeight, positions };
+  return { contentHeight, positionShift, positions };
 }
 
 // Where to splice the open composer among the document-ordered comment cards so

@@ -153,11 +153,29 @@ function ThreadCard(props: RailProps & { thread: Thread; status?: AnchorStatus }
 
       {!editingId && (
         <div class="thread-foot" onClick={(e) => e.stopPropagation()}>
-          <button type="button" class="icon-action" title="Reply" aria-label="Reply" onClick={() => setReplyOpen((v) => !v)}>
+          <button
+            type="button"
+            class="icon-action"
+            title="Reply"
+            aria-label="Reply"
+            onClick={() => {
+              props.onSelectThread(thread.id);
+              setReplyOpen((v) => !v);
+            }}
+          >
             <ReplyIcon />
           </button>
           {canEditLast && (
-            <button type="button" class="icon-action" title="Edit comment" aria-label="Edit comment" onClick={() => setEditingId(lastMessage!.id)}>
+            <button
+              type="button"
+              class="icon-action"
+              title="Edit comment"
+              aria-label="Edit comment"
+              onClick={() => {
+                props.onSelectThread(thread.id);
+                setEditingId(lastMessage!.id);
+              }}
+            >
               <EditIcon />
             </button>
           )}

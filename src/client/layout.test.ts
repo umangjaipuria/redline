@@ -21,13 +21,14 @@ describe("alignedRailItemTop", () => {
 
 describe("stackedRailItemLayout", () => {
   test("empty input yields no positions", () => {
-    const { positions, contentHeight } = stackedRailItemLayout({ items: [] });
+    const { positions, contentHeight, positionShift } = stackedRailItemLayout({ items: [] });
     expect(positions.size).toBe(0);
     expect(contentHeight).toBe(0);
+    expect(positionShift).toBe(0);
   });
 
   test("packs items to their target tops without overlap (no active card)", () => {
-    const { positions } = stackedRailItemLayout({
+    const { positions, positionShift } = stackedRailItemLayout({
       edgePadding: 16,
       gap: 12,
       railViewportTop: 0,
@@ -42,6 +43,7 @@ describe("stackedRailItemLayout", () => {
     expect(positions.get("a")).toBe(0);
     expect(positions.get("b")).toBe(112);
     expect(positions.get("c")).toBe(400);
+    expect(positionShift).toBe(0);
   });
 
   test("active card keeps its exact target; earlier cards are pushed above it", () => {
@@ -71,6 +73,25 @@ describe("stackedRailItemLayout", () => {
       expect(tops[i]!).toBeGreaterThanOrEqual(tops[i - 1]! + 100 + 12); // no overlap, in order
     }
     expect(contentHeight).toBe(tops[5]! + 100 + 16);
+  });
+
+  test("comments above the viewport stay reachable after jumping to a lower anchor", () => {
+    const { positions, contentHeight, positionShift } = stackedRailItemLayout({
+      edgePadding: 16,
+      gap: 12,
+      items: [
+        { id: "top", height: 100, targetViewportTop: -520 },
+        { id: "middle", height: 100, targetViewportTop: -340 },
+        { id: "bottom", height: 100, targetViewportTop: 260 },
+      ],
+    });
+    const tops = ["top", "middle", "bottom"].map((id) => positions.get(id)!);
+    expect(Math.min(...tops)).toBe(0);
+    for (let i = 1; i < tops.length; i += 1) {
+      expect(tops[i]!).toBeGreaterThanOrEqual(tops[i - 1]! + 100 + 12);
+    }
+    expect(contentHeight).toBe(tops[2]! + 100 + 16);
+    expect(positionShift).toBe(520);
   });
 
   test("null target (anchor offscreen) flows off the previous card", () => {

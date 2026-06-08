@@ -42,21 +42,82 @@ export function App() {
   const onViewportRef = useRef<() => void>(() => {});
   const beginCommentRef = useRef<() => void>(() => {});
   const fabRef = useRef<HTMLButtonElement | null>(null);
+  const railRevealAnimationRef = useRef<number | null>(null);
 
   activeThreadRef.current = activeThread;
   selectionRef.current = selection;
   composerOpenRef.current = composerOpen;
+
+  const setRailCollapsed = useCallback((collapsed: boolean) => {
+    setRailCollapsedState(collapsed);
+    localStorage.setItem("redline.railCollapsed", collapsed ? "1" : "0");
+  }, []);
+
+  const animateRailScrollTo = useCallback((rail: HTMLElement, targetTop: number) => {
+    if (railRevealAnimationRef.current !== null) {
+      cancelAnimationFrame(railRevealAnimationRef.current);
+      railRevealAnimationRef.current = null;
+    }
+    const startTop = rail.scrollTop;
+    const distance = targetTop - startTop;
+    if (Math.abs(distance) < 1) {
+      rail.scrollTop = targetTop;
+      return;
+    }
+
+    const startedAt = performance.now();
+    const duration = 280;
+    const step = (now: number) => {
+      const progress = Math.min(1, (now - startedAt) / duration);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      rail.scrollTop = startTop + distance * eased;
+      if (progress < 1) {
+        railRevealAnimationRef.current = requestAnimationFrame(step);
+      } else {
+        rail.scrollTop = targetTop;
+        railRevealAnimationRef.current = null;
+      }
+    };
+    railRevealAnimationRef.current = requestAnimationFrame(step);
+  }, []);
+
+  const revealThreadCardInRail = useCallback((id: string) => {
+    const reveal = () => {
+      const rail = document.querySelector(".comment-rail") as HTMLElement | null;
+      const el = document.querySelector(`.thread-card[data-thread-id="${CSS.escape(id)}"]`) as HTMLElement | null;
+      if (!rail || !el) return;
+      const railRect = rail.getBoundingClientRect();
+      const elRect = el.getBoundingClientRect();
+      const centeredTop = rail.scrollTop + (elRect.top - railRect.top) - (rail.clientHeight - el.offsetHeight) / 2;
+      const maxTop = Math.max(0, rail.scrollHeight - rail.clientHeight);
+      animateRailScrollTo(rail, Math.max(0, Math.min(centeredTop, maxTop)));
+    };
+    reveal();
+    requestAnimationFrame(reveal);
+    window.setTimeout(reveal, 140);
+    window.setTimeout(reveal, 420);
+  }, [animateRailScrollTo]);
+
+  const selectThreadFromHighlight = useCallback(
+    (threadId: string | null) => {
+      setActiveThread(threadId);
+      if (!threadId) return;
+      setRailCollapsed(false);
+      revealThreadCardInRail(threadId);
+    },
+    [revealThreadCardInRail, setRailCollapsed],
+  );
 
   // Create the imperative viewer once the iframe element exists.
   useEffect(() => {
     if (!iframeRef.current || viewerRef.current) return;
     viewerRef.current = new DocumentViewer(iframeRef.current, {
       onSelection: (selectors) => setSelection(selectors),
-      onHighlightClick: (threadId) => setActiveThread(threadId),
+      onHighlightClick: selectThreadFromHighlight,
       onViewportChange: () => onViewportRef.current(),
       onCommentShortcut: () => beginCommentRef.current(),
     });
-  }, [mode]);
+  }, [mode, selectThreadFromHighlight]);
 
   const refreshFrom = useCallback((next: DocumentStateResponse) => {
     setState(next);
@@ -203,12 +264,8 @@ export function App() {
     if (!activeThread) return;
     const id = activeThread;
     viewerRef.current?.scrollToThread(id);
-    requestAnimationFrame(() => {
-      if (activeThreadRef.current !== id) return;
-      const el = document.querySelector(`.thread-card[data-thread-id="${CSS.escape(id)}"]`) as HTMLElement | null;
-      el?.scrollIntoView({ block: "center", behavior: "smooth" });
-    });
-  }, [activeThread]);
+    revealThreadCardInRail(id);
+  }, [activeThread, revealThreadCardInRail]);
 
   // When the composer opens, scroll the rail so it is visible.
   useEffect(() => {
@@ -222,11 +279,6 @@ export function App() {
     setAuthor(value);
     localStorage.setItem("redline.author", value);
   };
-
-  const setRailCollapsed = useCallback((collapsed: boolean) => {
-    setRailCollapsedState(collapsed);
-    localStorage.setItem("redline.railCollapsed", collapsed ? "1" : "0");
-  }, []);
 
   const openFile = async (path: string) => {
     try {
@@ -375,10 +427,11 @@ export function App() {
     // document order at NON-NEGATIVE positions, so every card is reachable by
     // scrolling the rail (pinning the active card pushed earlier cards to negative
     // positions a scroll container can't reach). Positions are stable regardless of
-    // rail scroll; alignment to the active comment is done by scrolling the rail to
-    // it on activation (see the activeThread effect). At rail.scrollTop=0 the cards
-    // sit at their anchors; scrolling the rail browses overflow.
-    const { positions, contentHeight } = stackedRailItemLayout({
+    // manual rail scroll. When the document scrolls past earlier anchors, the
+    // layout shifts the stack down so it stays reachable; applying the same shift
+    // to rail.scrollTop preserves visual alignment, so comments enter the rail as
+    // their anchors enter the document viewport.
+    const { positions, contentHeight, positionShift } = stackedRailItemLayout({
       items: entries.map((e) => ({ id: e.id, height: e.height, targetViewportTop: e.targetViewportTop })),
       railScrollTop: 0,
       railViewportTop: railTop,
@@ -388,6 +441,7 @@ export function App() {
       e.el.style.top = top === undefined ? "" : `${Math.round(top)}px`;
     }
     inner.style.height = `${Math.round(contentHeight)}px`;
+    rail.scrollTop = positionShift;
   };
   // Imperatively position/hide the floating comment button (no re-render on
   // scroll). Lives on the same viewport-change path as the rail layout so the
