@@ -205,29 +205,37 @@ export class DocumentViewer {
 
     let chosen = matches[0]!;
     if (matches.length > 1) {
-      if (anchor.range) {
-        // The client text layer and the server canonical text use the same
-        // normalization, so the resolved offset aligns closely; pick the nearest
-        // occurrence. This faithfully reproduces the server's occurrence choice.
+      // Disambiguate by surrounding context FIRST. prefix/suffix are compared
+      // over a small local window, so they are robust to whitespace/offset drift
+      // between the server's canonical text and the client's rendered text layer
+      // (unlike absolute offsets, which accumulate drift across many blocks).
+      let bestScore = -Infinity;
+      const top: typeof matches = [];
+      for (const match of matches) {
+        const score = contextScore(index.text, match, anchor.prefix ?? "", anchor.suffix ?? "");
+        if (score > bestScore) {
+          bestScore = score;
+          top.length = 0;
+          top.push(match);
+        } else if (score === bestScore) {
+          top.push(match);
+        }
+      }
+
+      if (top.length === 1 && bestScore > 0) {
+        chosen = top[0]!;
+      } else if (anchor.range) {
+        // Context tied (or gave no signal): fall back to the server's resolved
+        // offset as a best-effort tiebreaker among the otherwise-equal candidates.
         const target = anchor.range.start;
-        chosen = matches.reduce((best, m) =>
+        const pool = top.length > 0 ? top : matches;
+        chosen = pool.reduce((best, m) =>
           Math.abs(m.start - target) < Math.abs(best.start - target) ? m : best,
         );
       } else {
-        let bestScore = -Infinity;
-        let unique = true;
-        for (const match of matches) {
-          const score = contextScore(index.text, match, anchor.prefix ?? "", anchor.suffix ?? "");
-          if (score > bestScore) {
-            bestScore = score;
-            chosen = match;
-            unique = true;
-          } else if (score === bestScore) {
-            unique = false;
-          }
-        }
-        // No server range and context can't disambiguate: do not guess.
-        if (!unique && bestScore <= 0) return null;
+        // No context signal and no server offset: genuinely ambiguous. Leave it
+        // unpainted rather than silently highlight the wrong occurrence.
+        return null;
       }
     }
     const range = this.rangeFor(index, chosen.start, chosen.end);
@@ -305,34 +313,59 @@ const HIGHLIGHT_STYLE = `<style>
   ::selection { background: rgba(196, 54, 29, 0.25); }
 </style>`;
 
-// A strict CSP for the reviewed document, layered on top of the sandbox. The
-// iframe already blocks scripts/forms/popups/top-navigation via its sandbox
-// flags (no allow-scripts/allow-forms); this additionally forbids ALL remote
-// resource loads — images, styles, fonts, media resolve only from the
-// document's own asset route (same-origin) or inline/data/blob. No script can
-// run, nothing beacons out, nothing navigates.
-const CSP_META =
-  `<meta http-equiv="Content-Security-Policy" content="` +
-  `default-src 'none'; ` +
-  `img-src 'self' data: blob:; ` +
-  `media-src 'self' data: blob:; ` +
-  `style-src 'self' 'unsafe-inline'; ` +
-  `font-src 'self' data:; ` +
-  // base-uri 'self' permits the doc-scoped asset <base> we inject (same origin)
-  // while still blocking any author-supplied off-origin base.
-  `base-uri 'self'; form-action 'none'; object-src 'none'; frame-src 'none'; script-src 'none'` +
-  `">`;
+// A strict CSP for the reviewed document, layered on top of the iframe sandbox
+// (which already blocks scripts/forms/popups/top-navigation). It forbids ALL
+// remote resource loads — images, styles, fonts, media resolve only from THIS
+// document's own asset route (an absolute, path-scoped source, not the broad
+// 'self') or inline/data/blob. No script runs, nothing beacons out, nothing
+// navigates.
+function buildCsp(assetSource: string): string {
+  const policy = [
+    `default-src 'none'`,
+    `img-src ${assetSource} data: blob:`,
+    `media-src ${assetSource} data: blob:`,
+    `style-src ${assetSource} 'unsafe-inline'`,
+    `font-src ${assetSource} data:`,
+    `base-uri ${assetSource}`, // permits exactly the <base> we inject
+    `form-action 'none'`,
+    `object-src 'none'`,
+    `frame-src 'none'`,
+    `script-src 'none'`,
+  ].join("; ");
+  return `<meta http-equiv="Content-Security-Policy" content="${policy}">`;
+}
 
+// Reconstruct the document into a known-good shell so Redline's CSP is the FIRST
+// token the parser sees — author resource tags (even ones placed before <head>
+// in malformed input) end up in <body>, after the CSP, and are therefore
+// governed by it. The author's own head styles/links are preserved but placed
+// after our CSP/base/style so the policy still applies to them.
 function injectBase(html: string, base: string): string {
-  // CSP must come first so it governs every subsequent resource declaration.
-  const head = `${CSP_META}<base href="${base}">${HIGHLIGHT_STYLE}`;
-  if (/<head\b[^>]*>/i.test(html)) {
-    return html.replace(/<head\b[^>]*>/i, (m) => `${m}${head}`);
+  const assetSource = absoluteAssetSource(base);
+  const headInner = html.match(/<head\b[^>]*>([\s\S]*?)<\/head>/i)?.[1] ?? "";
+  const bodyMatch = html.match(/<body\b([^>]*)>([\s\S]*?)<\/body>/i);
+  const bodyAttrs = bodyMatch ? bodyMatch[1] : "";
+  const bodyInner = bodyMatch
+    ? bodyMatch[2]
+    : html
+        .replace(/<!doctype[^>]*>/i, "")
+        .replace(/<\/?html\b[^>]*>/gi, "")
+        .replace(/<head\b[^>]*>[\s\S]*?<\/head>/i, "")
+        .trim();
+
+  const head = `${buildCsp(assetSource)}<base href="${base}">${HIGHLIGHT_STYLE}${headInner}`;
+  return `<!doctype html><html><head>${head}</head><body${bodyAttrs}>${bodyInner}</body></html>`;
+}
+
+// The absolute, path-scoped source for this document's assets, e.g.
+// http://127.0.0.1:7331/api/docs/doc_x/assets/ — a CSP host-source with a path
+// only matches URLs under that prefix.
+function absoluteAssetSource(base: string): string {
+  try {
+    return new URL(base, location.href).href;
+  } catch {
+    return base;
   }
-  if (/<html\b[^>]*>/i.test(html)) {
-    return html.replace(/<html\b[^>]*>/i, (m) => `${m}<head>${head}</head>`);
-  }
-  return `${head}${html}`;
 }
 
 const EXCLUDED_TEXT_ANCESTORS = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE"]);

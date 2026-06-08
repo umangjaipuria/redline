@@ -129,13 +129,25 @@ export function mutateState(
 ): DocumentView {
   const adapter = requireAdapterForPath(absolutePath);
 
-  // Optimistic-concurrency loop. Each attempt reads the CURRENT bytes, runs the
-  // mutation against the threads on disk now (so concurrent adds/edits by id
-  // merge cleanly), re-applies only our state block onto those bytes (so an
-  // external CONTENT edit is preserved), then re-reads immediately before the
-  // atomic rename and bails to a retry if the file moved underneath us. This is
-  // the CAS the plan asks for — no OS locks, which an external agent wouldn't
-  // honor anyway.
+  // Two layers of protection:
+  //  1. A cooperative lockfile serializes REDLINE writers to this file across
+  //     processes (a second server, a stale registry, a direct CLI write). The
+  //     plan's "every state-block write is serialized by Redline" — Redline
+  //     instances honor it because they are the same code. This is NOT relying
+  //     on the external agent to honor a lock (it doesn't); see layer 2.
+  //  2. Inside the lock, an optimistic re-read-before-rename merges any external
+  //     CONTENT edit the agent made (the agent writes content without the lock):
+  //     we re-apply only our state block onto the freshest bytes, and retry if
+  //     the file moved between our read and the rename.
+  return withWriteLock(absolutePath, () => mutateLocked(absolutePath, adapter, expectedVersion, mutate));
+}
+
+function mutateLocked(
+  absolutePath: string,
+  adapter: ReturnType<typeof requireAdapterForPath>,
+  expectedVersion: string | undefined,
+  mutate: (ctx: MutationContext) => MutationResult,
+): DocumentView {
   for (let attempt = 0; attempt < MAX_WRITE_ATTEMPTS; attempt += 1) {
     const content = readFile(absolutePath);
     const currentVersion = versionFor(content);
@@ -214,6 +226,63 @@ function writeFileAtomic(filePath: string, content: string): void {
   const tempPath = `${filePath}.${process.pid}.${randomSuffix()}.tmp`;
   fs.writeFileSync(tempPath, content, "utf8");
   fs.renameSync(tempPath, filePath);
+}
+
+const LOCK_TIMEOUT_MS = 3000;
+const LOCK_STALE_MS = 5000;
+
+// Cooperative advisory lock between Redline writers, via an O_EXCL lockfile next
+// to the document. Held only for the short, synchronous read/mutate/write cycle.
+// A lock older than LOCK_STALE_MS is treated as abandoned (the owner crashed) and
+// broken. The lockfile is a hidden sibling so it never shows in the file browser.
+function withWriteLock<T>(targetPath: string, fn: () => T): T {
+  const dir = path.dirname(targetPath);
+  const lockPath = path.join(dir, `.${path.basename(targetPath)}.redline-lock`);
+  fs.mkdirSync(dir, { recursive: true });
+
+  const deadline = Date.now() + LOCK_TIMEOUT_MS;
+  let fd: number | undefined;
+  while (fd === undefined) {
+    try {
+      fd = fs.openSync(lockPath, "wx");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      // Break a stale lock left by a crashed writer.
+      try {
+        if (Date.now() - fs.statSync(lockPath).mtimeMs > LOCK_STALE_MS) {
+          fs.rmSync(lockPath, { force: true });
+          continue;
+        }
+      } catch {
+        continue; // lock vanished; retry the create
+      }
+      if (Date.now() > deadline) {
+        // Rather than deadlock forever, break the lock and proceed; the
+        // optimistic re-read-before-rename still guards correctness.
+        fs.rmSync(lockPath, { force: true });
+        continue;
+      }
+      sleepSync(15);
+    }
+  }
+
+  try {
+    fs.writeSync(fd, `${process.pid}`);
+    return fn();
+  } finally {
+    fs.closeSync(fd);
+    try {
+      fs.rmSync(lockPath, { force: true });
+    } catch {
+      // Already removed; ignore.
+    }
+  }
+}
+
+// Block the current thread briefly (lock contention is rare and the critical
+// section is microseconds, so this never meaningfully stalls the event loop).
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
 function randomSuffix(): string {

@@ -6,3 +6,6 @@ dist/
 redline
 redline-*
 coverage/
+
+# Bun compile scratch artifacts
+*.bun-build
