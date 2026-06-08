@@ -33,11 +33,20 @@ interface TextIndex {
 
 export interface ViewerCallbacks {
   onSelection: (selectors: SelectorInput | null) => void;
-  onHighlightClick: (threadId: string) => void;
+  // A highlight was clicked (activate its thread), or empty document space was
+  // clicked (null → deactivate the current thread).
+  onHighlightClick: (threadId: string | null) => void;
+  // Fired when the document scrolls or its layout changes, so the rail can
+  // re-align comment cards to their anchors.
+  onViewportChange?: () => void;
+  // Cmd/Ctrl+Shift+M pressed while focus is inside the document iframe — the
+  // parent window never sees that keydown, so the viewer forwards it.
+  onCommentShortcut?: () => void;
 }
 
 export class DocumentViewer {
   private index: TextIndex | null = null;
+  private resizeObserver: ResizeObserver | null = null;
 
   constructor(
     private readonly iframe: HTMLIFrameElement,
@@ -73,11 +82,34 @@ export class DocumentViewer {
     doc.addEventListener("click", (event) => {
       const target = event.target as HTMLElement | null;
       const highlight = target?.closest?.(".redline-highlight[data-thread-id]") as HTMLElement | null;
-      if (highlight) {
-        const threadId = highlight.getAttribute("data-thread-id");
-        if (threadId) this.callbacks.onHighlightClick(threadId);
+      const threadId = highlight?.getAttribute("data-thread-id") ?? null;
+      // Clicking a highlight activates its thread; clicking elsewhere in the
+      // document deactivates the current one.
+      this.callbacks.onHighlightClick(threadId);
+    });
+    doc.addEventListener("keydown", (event) => {
+      if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "m") {
+        event.preventDefault();
+        this.callbacks.onCommentShortcut?.();
       }
     });
+    // Anything that moves an anchor on screen should re-align the rail: the main
+    // document scroll, a scroll inside a nested scroller (capture phase, since
+    // scroll doesn't bubble), an iframe resize, and late font layout. (A fresh
+    // document/window is created on each load, so these per-load listeners are
+    // discarded with it — no accumulation.)
+    const notify = () => this.callbacks.onViewportChange?.();
+    const win = this.iframe.contentWindow;
+    win?.addEventListener("scroll", notify, { passive: true });
+    win?.addEventListener("resize", notify, { passive: true });
+    doc.addEventListener("scroll", notify, { capture: true, passive: true });
+    doc.fonts?.ready?.then(notify).catch(() => {});
+    // Content reflow (images loading, late layout) also shifts anchors.
+    this.resizeObserver?.disconnect();
+    if (typeof ResizeObserver !== "undefined" && doc.body) {
+      this.resizeObserver = new ResizeObserver(notify);
+      this.resizeObserver.observe(doc.body);
+    }
   }
 
   // Rebuild the text layer + offset map. Called after load and after every
@@ -148,6 +180,13 @@ export class DocumentViewer {
     for (const item of planned) {
       wrapRange(doc, item.range, item.threadId, item.state, item.threadId === activeThreadId);
     }
+    // Wrapping split text nodes, so the offset map built above no longer points at
+    // the live DOM nodes. Rebuild it so selection capture can map the current nodes
+    // — otherwise selecting text in an already-highlighted block resolves to no
+    // anchor and the comment button never appears.
+    this.rebuildIndex();
+    // Anchors were (re)painted — positions may have shifted, so re-align.
+    this.callbacks.onViewportChange?.();
   }
 
   setActiveHighlight(activeThreadId: string | null): void {
@@ -162,6 +201,60 @@ export class DocumentViewer {
     const doc = this.doc();
     const el = doc?.querySelector(`.redline-highlight[data-thread-id="${cssEscape(threadId)}"]`);
     el?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  // The iframe's position in the top-window viewport — added to in-iframe
+  // coordinates to translate anchor/selection geometry into window space.
+  frameTop(): number {
+    return this.iframe.getBoundingClientRect().top;
+  }
+
+  // Top-window viewport Y of a thread's anchor (the topmost of its highlight
+  // rects), or null when the anchor isn't currently rendered/in layout.
+  anchorViewportTop(threadId: string): number | null {
+    const doc = this.doc();
+    if (!doc) return null;
+    let top = Infinity;
+    for (const el of Array.from(
+      doc.querySelectorAll(`.redline-highlight[data-thread-id="${cssEscape(threadId)}"]`),
+    )) {
+      for (const rect of Array.from(el.getClientRects())) {
+        if (rect.width === 0 && rect.height === 0) continue;
+        top = Math.min(top, rect.top);
+      }
+    }
+    return top === Infinity ? null : this.frameTop() + top;
+  }
+
+  // The live selection's last rect, in top-window coordinates — used to place
+  // the floating "comment on selection" button beside the selection.
+  selectionRect(): { left: number; right: number; top: number; bottom: number } | null {
+    const doc = this.doc();
+    const selection = doc?.getSelection?.();
+    if (!doc || !selection || selection.isCollapsed || selection.rangeCount === 0) return null;
+    const rects = selection.getRangeAt(0).getClientRects();
+    const rect = rects[rects.length - 1];
+    if (!rect || (rect.width === 0 && rect.height === 0)) return null;
+    const frameLeft = this.iframe.getBoundingClientRect().left;
+    const frameTop = this.frameTop();
+    return {
+      left: frameLeft + rect.left,
+      right: frameLeft + rect.right,
+      top: frameTop + rect.top,
+      bottom: frameTop + rect.bottom,
+    };
+  }
+
+  // Top-window Y of the start of the current selection — used to align the
+  // floating composer to the text being commented on.
+  selectionViewportTop(): number | null {
+    const doc = this.doc();
+    const selection = doc?.getSelection?.();
+    if (!doc || !selection || selection.rangeCount === 0) return null;
+    const rects = selection.getRangeAt(0).getClientRects();
+    const rect = rects[0];
+    if (!rect) return null;
+    return this.frameTop() + rect.top;
   }
 
   // The DOM order of currently-painted highlights — drives rail ordering so the

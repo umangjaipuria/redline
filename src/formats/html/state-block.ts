@@ -3,7 +3,7 @@
 // into an HTML file. Ported from the previous state.ts injection logic with the
 // new schema and marker text (no data-redline-anchor mention — spans are gone).
 
-import { normalizeState, type EmbeddedState } from "../../core/model";
+import { normalizeState, UnknownSchemaError, type EmbeddedState } from "../../core/model";
 import { MalformedStateError } from "../types";
 
 const STATE_SCRIPT_ID = "redline-state";
@@ -20,8 +20,9 @@ const STATE_SCRIPT_REMOVAL_PATTERN =
 const GUIDE_META_PATTERN = /<meta\b(?=[^>]*\bname\s*=\s*(["'])redline-agent-guide\1)[^>]*>/i;
 const GUIDE_COMMENT_PATTERN = /<!--\s*redline-agent-guide:/i;
 
-// Parse the embedded block. null when absent; throws MalformedStateError when a
-// block is present but unparseable or an unknown schema version.
+// Parse the embedded block. null when absent or carrying an old/foreign schema
+// version (ignored, not migrated); throws MalformedStateError only when a block
+// is present but genuinely unparseable.
 export function readStateBlock(html: string): EmbeddedState | null {
   const match = html.match(STATE_SCRIPT_PATTERN);
   if (!match?.[0]) return null;
@@ -39,6 +40,9 @@ export function readStateBlock(html: string): EmbeddedState | null {
   try {
     return normalizeState(parsed);
   } catch (error) {
+    // Old/foreign schema versions are not migrated — ignore the block entirely
+    // (treat as no review state), no warning. Only genuine corruption surfaces.
+    if (error instanceof UnknownSchemaError) return null;
     throw new MalformedStateError(
       error instanceof Error ? error.message : "The embedded Redline state block is invalid.",
     );

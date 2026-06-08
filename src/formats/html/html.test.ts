@@ -124,12 +124,14 @@ describe("readState / writeState round-trip", () => {
     expect(() => htmlAdapter.readState(broken)).toThrow(MalformedStateError);
   });
 
-  test("unknown schema version throws", () => {
+  test("old/foreign schema version is ignored, not migrated or surfaced", () => {
     const wrong = DOC.replace(
       "</head>",
       '<script type="application/json" id="redline-state">{"schemaVersion":999,"threads":[]}</script></head>',
     );
-    expect(() => htmlAdapter.readState(wrong)).toThrow(MalformedStateError);
+    // Unknown versions read as "no review state" (null) with no warning —
+    // old Redline files are explicitly not migrated.
+    expect(htmlAdapter.readState(wrong)).toBeNull();
   });
 
   test("replacing the block does not duplicate it", () => {

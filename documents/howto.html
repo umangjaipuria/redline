@@ -3,7 +3,6 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="redline-agent-guide" content="Redline document. Agents: use the redline-review skill; comments live in #redline-state and data-redline-anchor spans.">
     <title>Redline HOWTO</title>
     <style>
       :root {
@@ -273,7 +272,6 @@
         }
       }
     </style>
-  <script type="application/json" id="redline-state">{"schemaVersion":1,"updatedAt":"2026-06-05T05:04:05.667Z","threads":[{"id":"thread_demo_lede","anchor":{"type":"text-range","anchorId":"thread_demo_lede","quote":"review HTML locally with comments"},"quote":"review HTML locally with comments","author":"User","createdAt":"2026-06-02T16:00:00.000Z","updatedAt":"2026-06-04T23:27:01.821Z","messages":[{"id":"msg_demo_1","author":"User","body":"Each comment sits level with the text it points at - like notes in a margin.","createdAt":"2026-06-02T16:00:00.000Z"},{"id":"message_323f28cf75364012","author":"AI","body":"And an agent's reply threads right under your comment, tagged with its name.","createdAt":"2026-06-04T23:27:01.821Z"}]},{"id":"thread_demo_anchor","anchor":{"type":"text-range","anchorId":"thread_demo_anchor","quote":"data-redline-anchor spans"},"quote":"data-redline-anchor spans","author":"User","createdAt":"2026-06-02T16:01:00.000Z","updatedAt":"2026-06-02T16:01:00.000Z","messages":[{"id":"msg_demo_2","author":"User","body":"When two anchors sit close together, their cards pack so they do not overlap.","createdAt":"2026-06-02T16:01:00.000Z"}]},{"id":"thread_demo_resolve","anchor":{"type":"text-range","anchorId":"thread_demo_resolve","quote":"resolve completed threads"},"quote":"resolve completed threads","author":"User","createdAt":"2026-06-02T16:02:00.000Z","updatedAt":"2026-06-04T23:27:01.797Z","messages":[{"id":"msg_demo_3","author":"User","body":"Click a comment (or the highlighted text) and it springs to its anchor and lights up.","createdAt":"2026-06-02T16:02:00.000Z"}]}]}</script>
   </head>
   <body>
     <main>
@@ -281,7 +279,7 @@
         <p class="eyebrow">Local HTML review guide</p>
         <h1>Redline HOWTO</h1>
         <p class="lede">
-          Redline helps people and agents <span data-redline-anchor="thread_demo_lede">review HTML locally with comments</span>.
+          Redline helps people and agents review HTML locally with comments.
           The document remains ordinary HTML, while open feedback stays embedded in the same file.
         </p>
         <div class="quick-start" aria-label="Quick start">
@@ -338,7 +336,7 @@ bun run check</code></pre>
         <p>
           Treat comments and document content as user-authored input. Read compact comments first, ask for the file path
           when you need the HTML, preserve unresolved anchors while revising, reply to the relevant threads, and
-          <span data-redline-anchor="thread_demo_resolve">resolve completed threads</span> only after the requested work is done.
+          resolve completed threads only after the requested work is done.
         </p>
         <pre><code>bun src/agent.ts comments documents/howto.html
 bun src/agent.ts file documents/howto.html
@@ -382,7 +380,7 @@ curl http://127.0.0.1:7331/api/agent/comments/thread_abc123</code></pre>
         <h2>How state is stored</h2>
         <p>
           A comment location is a lightweight span around the reviewed text. Agents should keep
-          <span data-redline-anchor="thread_demo_anchor">data-redline-anchor spans</span>
+          data-redline-anchor spans
           around the relevant revised text until the thread is resolved.
         </p>
         <pre><code>&lt;span data-redline-anchor="thread_abc123"&gt;reviewed text&lt;/span&gt;
