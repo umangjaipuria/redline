@@ -483,6 +483,47 @@ export interface ServerOptions {
   documentPath?: string; // optional file to open at startup
   host: string;
   port: number;
+  portExplicit?: boolean; // user passed --port — keep this instance distinct
+  forceNew?: boolean; // user passed --new — always start a fresh server
+}
+
+// Redline runs one shared server holding many documents. When `start <file>` is
+// run and a server is ALREADY running, reuse it: open the file on it and return
+// the URL to print, rather than binding a second server. Returns null to start
+// fresh. Reuse is skipped when no file is given (a bare `start`/`dev` always
+// boots its own server), when --port pins a specific instance, or with --new.
+// The candidate server's /api/health is probed first so a stale registry entry
+// (pid alive but not actually serving) doesn't misroute the open.
+export async function reuseRunningServer(
+  options: ServerOptions,
+  deps: { serversDir?: string; fetchImpl?: typeof fetch } = {},
+): Promise<string | null> {
+  if (!options.documentPath || options.portExplicit || options.forceNew) return null;
+  const serversDir = deps.serversDir ?? SERVERS_DIR;
+  const fetchImpl = deps.fetchImpl ?? fetch;
+
+  for (const record of readServerRecords(serversDir)) {
+    try {
+      const health = await fetchImpl(`${record.url}api/health`, { signal: AbortSignal.timeout(500) });
+      if (!health.ok) continue;
+      const opened = await fetchImpl(`${record.url}api/docs`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: options.documentPath }),
+      });
+      if (!opened.ok) continue;
+      const info = (await opened.json()) as { docId?: string };
+      const url = info.docId ? `${record.url}?doc=${info.docId}` : record.url;
+      return (
+        `Redline is already running (pid ${record.pid}); opened ${options.documentPath} on it.\n` +
+        `${url}\n` +
+        `(Use --new to start a separate server, or --port N for one on another port.)`
+      );
+    } catch {
+      // Unreachable or errored — try the next registered server.
+    }
+  }
+  return null;
 }
 
 export function startServer(options: ServerOptions): void {
@@ -582,28 +623,45 @@ function registerCleanup(cleanup: () => void): void {
 }
 
 if (import.meta.main) {
-  startServer(parseArgs(Bun.argv.slice(2)));
+  const options = parseArgs(Bun.argv.slice(2));
+  const reused = await reuseRunningServer(options);
+  if (reused) {
+    console.log(reused);
+  } else {
+    startServer(options);
+  }
 }
 
 function parseArgs(args: string[]): ServerOptions {
   let documentPath: string | undefined;
   let host = "127.0.0.1";
   let port = 7331;
+  let portExplicit = false;
+  let forceNew = false;
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
     if (!arg) continue;
     if (arg === "-h" || arg === "--help") {
-      console.log("Usage: bun src/server/server.ts [document.html] [--port 7331] [--host 127.0.0.1]");
+      console.log(
+        [
+          "Usage: bun run start [document.html] [--port 7331] [--host 127.0.0.1] [--new]",
+          "",
+          "With a file, opens it for review and prints a localhost URL. If a Redline",
+          "server is already running, the file is opened on THAT server (one shared",
+          "server holds many documents) unless you pass --new or --port.",
+        ].join("\n"),
+      );
       process.exit(0);
     }
+    if (arg === "--new") { forceNew = true; continue; }
     if (arg === "--host") { host = args[++i] ?? host; continue; }
-    if (arg === "--port" || arg === "-p") { port = parsePort(args[++i]); continue; }
-    if (arg.startsWith("--port=")) { port = parsePort(arg.slice(7)); continue; }
+    if (arg === "--port" || arg === "-p") { port = parsePort(args[++i]); portExplicit = true; continue; }
+    if (arg.startsWith("--port=")) { port = parsePort(arg.slice(7)); portExplicit = true; continue; }
     if (arg.startsWith("--host=")) { host = arg.slice(7); continue; }
     if (arg.startsWith("-")) throw new Error(`Unknown flag: ${arg}`);
     documentPath = expandPath(arg);
   }
-  return { documentPath, host, port };
+  return { documentPath, host, port, portExplicit, forceNew };
 }
 
 function parsePort(value: string | undefined): number {

@@ -2,8 +2,9 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { createRequestHandler } from "./server";
+import { createRequestHandler, reuseRunningServer } from "./server";
 import { SessionManager } from "./sessions";
+import { writeServerRecord } from "./registry";
 import type { DocumentStateResponse, DocumentSessionInfo } from "../shared";
 
 const DOC = `<!doctype html>
@@ -305,6 +306,60 @@ describe("multiple documents", () => {
     const docs = manager.registryDocs();
     expect(docs).toHaveLength(2);
     expect(new Set(docs.map((d) => d.path)).size).toBe(2);
+  });
+});
+
+describe("reuseRunningServer (start reuses a running server)", () => {
+  function fakeFetchTo(h: typeof handler): typeof fetch {
+    return ((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const rest = url.replace("http://server.local/", "");
+      return h(new Request(`http://127.0.0.1/${rest}`, init));
+    }) as unknown as typeof fetch;
+  }
+
+  function registerSelf(serversDir: string): void {
+    // Use our own pid so readServerRecords keeps the entry (it prunes dead pids).
+    writeServerRecord(serversDir, {
+      url: "http://server.local/",
+      pid: process.pid,
+      startedAt: new Date().toISOString(),
+      docs: [],
+    });
+  }
+
+  test("opens the file on the running server instead of binding a second one", async () => {
+    const serversDir = path.join(dir, "servers");
+    registerSelf(serversDir);
+    const msg = await reuseRunningServer(
+      { documentPath: file, host: "127.0.0.1", port: 7331 },
+      { serversDir, fetchImpl: fakeFetchTo(handler) },
+    );
+    expect(msg).not.toBeNull();
+    expect(msg).toContain("already running");
+    expect(msg).toMatch(/\?doc=doc_/);
+    // The doc is now open on that server.
+    const list = await (await handler(req("GET", "/api/docs"))).json();
+    expect(list.docs).toHaveLength(1);
+  });
+
+  test("returns null (start fresh) with --new, --port, or no file", async () => {
+    const serversDir = path.join(dir, "servers");
+    registerSelf(serversDir);
+    const fetchImpl = fakeFetchTo(handler);
+    const base = { documentPath: file, host: "127.0.0.1", port: 7331 };
+    expect(await reuseRunningServer({ ...base, forceNew: true }, { serversDir, fetchImpl })).toBeNull();
+    expect(await reuseRunningServer({ ...base, portExplicit: true }, { serversDir, fetchImpl })).toBeNull();
+    expect(await reuseRunningServer({ host: "127.0.0.1", port: 7331 }, { serversDir, fetchImpl })).toBeNull();
+  });
+
+  test("returns null when no server is registered (so a fresh one starts)", async () => {
+    const serversDir = path.join(dir, "servers-empty");
+    const msg = await reuseRunningServer(
+      { documentPath: file, host: "127.0.0.1", port: 7331 },
+      { serversDir, fetchImpl: fakeFetchTo(handler) },
+    );
+    expect(msg).toBeNull();
   });
 });
 
