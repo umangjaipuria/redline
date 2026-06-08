@@ -5,7 +5,7 @@ node_modules/
 dist/
 /redline
 /redline-*
-coverage/
+.test-artifacts/
 
 # Bun compile scratch artifacts
 *.bun-build

@@ -1,6 +1,6 @@
 // Build the Preact client to dist/ with Bun's built-in bundler. The server runs
-// TypeScript directly (no build); only the client needs bundling. dist/ is
-// gitignored — CI builds it, and `bun build --compile` embeds it into the binary.
+// TypeScript directly (no build); only the browser client needs bundling.
+// dist/ is gitignored and served as an external asset directory.
 
 import fs from "node:fs";
 import path from "node:path";

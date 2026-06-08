@@ -30,6 +30,9 @@ Redline is a local app that opens an agent-written HTML document in your browser
    bun run check
    ```
 
+   The first browser-test run installs Playwright's Chromium into `.test-artifacts/playwright/browsers/`
+   inside the repo. `.test-artifacts/` is gitignored and can be deleted at any time.
+
 4. **Install the review skill** so your agent knows how to work with Redline documents. Symlink it into your agent's skills directory:
 
    ```bash
@@ -88,8 +91,12 @@ bun run start docs/howto.html        # start the review server; prints a localho
 | `bun run dev` | Start the server with `--watch` (auto-restart on server-code changes). The client bundle is not watched — re-run `build:client` after client edits. |
 | `bun src/agent/cli.ts <command>` | The `redline` CLI (see [How agents talk to Redline](#how-agents-talk-to-redline)). Run `bun link` once to expose it globally as `redline`. |
 | `bun test` | Run the test suite. |
-| `bun run check` | Typecheck (`tsc --noEmit`) and run the tests. |
-| `bun run build:binary` | Compile a standalone server executable to `./redline` via `bun build --compile`. |
+| `bun run test:browser` | Build the client, install Chromium into `.test-artifacts/playwright/browsers/` if needed, and run the Playwright browser tests. |
+| `bun run check` | Typecheck (`tsc --noEmit`), run the Bun tests, and run the Playwright browser tests. |
+| `bun run coverage` | Run Bun test coverage. Reports are written under `.test-artifacts/coverage/unit/`. |
+| `bun run coverage:all` | Run Bun coverage plus Playwright browser V8 coverage. Browser coverage is summarized separately from Bun's source-line table. |
+| `bun run build:binary` | Build the client into `dist/`, then compile a standalone server executable to `./redline` via `bun build --compile`. |
+| `bun run clean` | Remove local generated/install artifacts (`node_modules/`, `dist/`, `.test-artifacts/`, compiled `redline` binaries, and Bun compile scratch files). |
 
 Notes:
 
