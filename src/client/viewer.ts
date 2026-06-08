@@ -226,12 +226,14 @@ export class DocumentViewer {
         chosen = top[0]!;
       } else if (anchor.range) {
         // Context tied (or gave no signal): fall back to the server's resolved
-        // offset as a best-effort tiebreaker among the otherwise-equal candidates.
+        // offset as a tiebreaker among the otherwise-equal candidates — but only
+        // if it picks a UNIQUE nearest. Equidistant candidates stay ambiguous.
         const target = anchor.range.start;
         const pool = top.length > 0 ? top : matches;
-        chosen = pool.reduce((best, m) =>
-          Math.abs(m.start - target) < Math.abs(best.start - target) ? m : best,
-        );
+        const minDist = Math.min(...pool.map((m) => Math.abs(m.start - target)));
+        const nearest = pool.filter((m) => Math.abs(m.start - target) === minDist);
+        if (nearest.length !== 1) return null;
+        chosen = nearest[0]!;
       } else {
         // No context signal and no server offset: genuinely ambiguous. Leave it
         // unpainted rather than silently highlight the wrong occurrence.
@@ -340,18 +342,23 @@ function buildCsp(assetSource: string): string {
 // in malformed input) end up in <body>, after the CSP, and are therefore
 // governed by it. The author's own head styles/links are preserved but placed
 // after our CSP/base/style so the policy still applies to them.
-function injectBase(html: string, base: string): string {
+// Exported for unit testing the reconstruction; not part of the public viewer API.
+export function injectBase(html: string, base: string): string {
   const assetSource = absoluteAssetSource(base);
   const headInner = html.match(/<head\b[^>]*>([\s\S]*?)<\/head>/i)?.[1] ?? "";
-  const bodyMatch = html.match(/<body\b([^>]*)>([\s\S]*?)<\/body>/i);
-  const bodyAttrs = bodyMatch ? bodyMatch[1] : "";
-  const bodyInner = bodyMatch
-    ? bodyMatch[2]
-    : html
-        .replace(/<!doctype[^>]*>/i, "")
-        .replace(/<\/?html\b[^>]*>/gi, "")
-        .replace(/<head\b[^>]*>[\s\S]*?<\/head>/i, "")
-        .trim();
+  const bodyAttrs = html.match(/<body\b([^>]*)>/i)?.[1] ?? "";
+  // Body content = EVERYTHING that isn't in <head>. We strip the head block and
+  // the doctype/html/body wrapper tags but keep all other tokens, wherever they
+  // sat (before <head>, between </head> and <body>, inside body, after </body>),
+  // so no author content is dropped and any stray resource tag still ends up
+  // after our CSP in the rebuilt body.
+  const bodyInner = html
+    .replace(/<head\b[^>]*>[\s\S]*?<\/head>/i, "")
+    .replace(/<!doctype[^>]*>/i, "")
+    .replace(/<\/?html\b[^>]*>/gi, "")
+    .replace(/<body\b[^>]*>/i, "")
+    .replace(/<\/body>/i, "")
+    .trim();
 
   const head = `${buildCsp(assetSource)}<base href="${base}">${HIGHLIGHT_STYLE}${headInner}`;
   return `<!doctype html><html><head>${head}</head><body${bodyAttrs}>${bodyInner}</body></html>`;

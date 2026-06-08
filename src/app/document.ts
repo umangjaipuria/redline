@@ -228,54 +228,86 @@ function writeFileAtomic(filePath: string, content: string): void {
   fs.renameSync(tempPath, filePath);
 }
 
-const LOCK_TIMEOUT_MS = 3000;
-const LOCK_STALE_MS = 5000;
+const LOCK_TIMEOUT_MS = 10_000;
+const LOCK_STALE_MS = 30_000;
 
 // Cooperative advisory lock between Redline writers, via an O_EXCL lockfile next
 // to the document. Held only for the short, synchronous read/mutate/write cycle.
-// A lock older than LOCK_STALE_MS is treated as abandoned (the owner crashed) and
-// broken. The lockfile is a hidden sibling so it never shows in the file browser.
+// Ownership rules (the round-3 fix): a UNIQUE token is written into the lock; we
+// only ever remove a lock that still carries our token; a LIVE (non-stale) lock
+// is never broken — we time out with a ConflictError instead; and a stale lock
+// is broken atomically by renaming it away (only one waiter can win the rename),
+// so two waiters can't both "break" it into double ownership. The lockfile is a
+// hidden sibling so it never shows in the file browser.
 function withWriteLock<T>(targetPath: string, fn: () => T): T {
   const dir = path.dirname(targetPath);
   const lockPath = path.join(dir, `.${path.basename(targetPath)}.redline-lock`);
   fs.mkdirSync(dir, { recursive: true });
+  const token = `${process.pid}.${randomSuffix()}`;
 
   const deadline = Date.now() + LOCK_TIMEOUT_MS;
-  let fd: number | undefined;
-  while (fd === undefined) {
+  let acquired = false;
+  while (!acquired) {
     try {
-      fd = fs.openSync(lockPath, "wx");
+      const fd = fs.openSync(lockPath, "wx");
+      fs.writeSync(fd, token);
+      fs.closeSync(fd);
+      acquired = true;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      // Break a stale lock left by a crashed writer.
-      try {
-        if (Date.now() - fs.statSync(lockPath).mtimeMs > LOCK_STALE_MS) {
-          fs.rmSync(lockPath, { force: true });
-          continue;
-        }
-      } catch {
-        continue; // lock vanished; retry the create
-      }
+      if (tryBreakStaleLock(lockPath)) continue; // broke an abandoned lock; retry
       if (Date.now() > deadline) {
-        // Rather than deadlock forever, break the lock and proceed; the
-        // optimistic re-read-before-rename still guards correctness.
-        fs.rmSync(lockPath, { force: true });
-        continue;
+        // Do NOT break a live lock — that would create double ownership. The
+        // holder is actively writing (its critical section is sub-millisecond,
+        // so this only fires under genuine pathology); surface a conflict.
+        throw new ConflictError(
+          "Another Redline writer holds the document lock. Retry.",
+          buildView(targetPath, readFile(targetPath)),
+        );
       }
-      sleepSync(15);
+      sleepSync(10);
     }
   }
 
   try {
-    fs.writeSync(fd, `${process.pid}`);
     return fn();
   } finally {
-    fs.closeSync(fd);
-    try {
+    releaseLock(lockPath, token);
+  }
+}
+
+// Break a lock only if it is older than LOCK_STALE_MS, and atomically: rename it
+// to a unique name first (only one waiter can win that rename) and delete the
+// renamed copy. Returns true if a stale lock was broken (caller should retry).
+function tryBreakStaleLock(lockPath: string): boolean {
+  let mtimeMs: number;
+  try {
+    mtimeMs = fs.statSync(lockPath).mtimeMs;
+  } catch {
+    return true; // lock vanished between open and stat; just retry the create
+  }
+  if (Date.now() - mtimeMs <= LOCK_STALE_MS) return false;
+  const stealPath = `${lockPath}.${process.pid}.${randomSuffix()}.steal`;
+  try {
+    fs.renameSync(lockPath, stealPath); // atomic: only one waiter wins
+    fs.rmSync(stealPath, { force: true });
+    return true;
+  } catch {
+    // Another waiter renamed it first, or the holder removed it; retry the create.
+    return true;
+  }
+}
+
+// Remove the lock only if it still carries OUR token (a stale-break by another
+// waiter, after we somehow exceeded the stale window, must not let us delete a
+// successor's lock).
+function releaseLock(lockPath: string, token: string): void {
+  try {
+    if (fs.readFileSync(lockPath, "utf8") === token) {
       fs.rmSync(lockPath, { force: true });
-    } catch {
-      // Already removed; ignore.
     }
+  } catch {
+    // Already gone or unreadable; nothing to release.
   }
 }
 

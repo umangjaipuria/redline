@@ -183,6 +183,20 @@ describe("merge-on-write (no expectedVersion)", () => {
     expect(view.threads).toHaveLength(2);
   });
 
+  test("a stale lockfile is broken so writes still succeed", () => {
+    // Simulate a crashed writer that left a lock behind, backdated past the
+    // stale window.
+    const lockPath = path.join(dir, `.${path.basename(file)}.redline-lock`);
+    fs.writeFileSync(lockPath, "99999.deadbeef", "utf8");
+    const old = Date.now() / 1000 - 120; // 2 minutes ago
+    fs.utimesSync(lockPath, old, old);
+
+    const view = createComment(file, { message: "after stale lock", quote: "redesign" });
+    expect(view.threads).toHaveLength(1);
+    // The stale lock was broken and our own lock released.
+    expect(fs.existsSync(lockPath)).toBe(false);
+  });
+
   test("agent batch and a direct comment both land (id-keyed merge)", () => {
     const seed = createComment(file, { message: "seed", quote: "redesign" });
     const update = applyAgentUpdate(file, {
