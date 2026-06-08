@@ -306,7 +306,7 @@
         <section>
           <h2>For reviewers</h2>
           <ol>
-            <li>Open the app with <code>bun run start documents/howto.html</code>, then visit the printed localhost URL.</li>
+            <li>Open the app with <code>bun run start docs/howto.html</code>, then visit the printed localhost URL.</li>
             <li>Put your name in the top bar so new comments and replies are attributed correctly.</li>
             <li>Select text in the document, click the floating comment button, and write the note.</li>
             <li>Click a highlighted phrase or comment card to line the two up in the margin.</li>
@@ -320,8 +320,8 @@
 
         <section>
           <h2>Run commands</h2>
-          <pre><code>bun run start documents/howto.html
-bun run start documents/howto.html --port 7332
+          <pre><code>bun run start docs/howto.html
+bun run start docs/howto.html --port 7332
 bun run check</code></pre>
           <p>
             If no path is provided — or the path isn't an existing HTML file — Redline opens with no document and
@@ -338,14 +338,14 @@ bun run check</code></pre>
           when you need the HTML, preserve unresolved anchors while revising, reply to the relevant threads, and
           resolve completed threads only after the requested work is done.
         </p>
-        <pre><code>bun src/agent.ts comments documents/howto.html
-bun src/agent.ts file documents/howto.html
-bun src/agent.ts comment documents/howto.html "exact quoted text" "This needs a source." --author AI
-bun src/agent.ts comment documents/howto.html "exact quoted text" "This second mention needs a source." --occurrence 2 --author AI
-bun src/agent.ts reply documents/howto.html thread_abc123 "I revised this section." --author AI
-bun src/agent.ts delete-reply documents/howto.html thread_abc123 message_reply456
-bun src/agent.ts resolve documents/howto.html thread_abc123
-bun src/agent.ts apply documents/howto.html /tmp/redline-update.json</code></pre>
+        <pre><code>bun src/agent.ts comments docs/howto.html
+bun src/agent.ts file docs/howto.html
+bun src/agent.ts comment docs/howto.html "exact quoted text" "This needs a source." --author AI
+bun src/agent.ts comment docs/howto.html "exact quoted text" "This second mention needs a source." --occurrence 2 --author AI
+bun src/agent.ts reply docs/howto.html thread_abc123 "I revised this section." --author AI
+bun src/agent.ts delete-reply docs/howto.html thread_abc123 message_reply456
+bun src/agent.ts resolve docs/howto.html thread_abc123
+bun src/agent.ts apply docs/howto.html /tmp/redline-update.json</code></pre>
         <p>
           With the server running, use the HTTP index to scan recent activity without full message bodies, then fetch one
           thread when you need the full conversation.
@@ -367,7 +367,7 @@ curl http://127.0.0.1:7331/api/agent/comments/thread_abc123</code></pre>
           Use <code>comment</code> when proofreading or reviewing without editing directly. It creates the first message in a
           new thread anchored to existing text; use <code>reply</code> only when responding inside a thread that already exists.
         </p>
-        <pre><code>bun src/agent.ts comment documents/howto.html "claim to review" "Please add a source." --author AI</code></pre>
+        <pre><code>bun src/agent.ts comment docs/howto.html "claim to review" "Please add a source." --author AI</code></pre>
         <div class="callout blue">
           <strong>Repeated text</strong>
           If the anchor text appears more than once, Redline will not guess. Pass <code>--occurrence N</code>, where

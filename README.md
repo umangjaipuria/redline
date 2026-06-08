@@ -43,11 +43,11 @@ Redline is a local app that opens an agent-written HTML document in your browser
 
    ```bash
    bun run build:client
-   bun run start documents/howto.html
+   bun run start docs/howto.html
    ```
 
    With no path — or a path that isn't an existing HTML file — Redline starts with no document open and prompts you
-   to choose one in the browser (the bundled `documents/howto.html` guide is offered as a starting point). Redline
+   to choose one in the browser (the bundled `docs/howto.html` guide is offered as a starting point). Redline
    only reviews files that already exist; it never creates one for you.
 
    ```bash
@@ -57,7 +57,7 @@ Redline is a local app that opens an agent-written HTML document in your browser
    Use another port when needed:
 
    ```bash
-   bun run start documents/howto.html --port 7332
+   bun run start docs/howto.html --port 7332
    ```
 
    Run `bun run start --help` to see all command-line options.
@@ -77,7 +77,7 @@ client, which Bun bundles to `dist/`.
 ```bash
 bun install                          # install dependencies (Preact)
 bun run build:client                 # bundle the web client into dist/ (required before first run)
-bun run start documents/howto.html   # start the review server; prints a localhost URL (default :7331)
+bun run start docs/howto.html   # start the review server; prints a localhost URL (default :7331)
 ```
 
 | Command | What it does |
@@ -132,55 +132,55 @@ Agents should pass their own name with `--author` or in JSON payloads, for examp
 Read comments without loading the full HTML:
 
 ```bash
-bun src/agent.ts comments documents/howto.html
+bun src/agent.ts comments docs/howto.html
 ```
 
 Get the current file path when you need to read or edit the HTML:
 
 ```bash
-bun src/agent.ts file documents/howto.html
+bun src/agent.ts file docs/howto.html
 ```
 
 Leave a new top-level comment thread anchored to existing text:
 
 ```bash
-bun src/agent.ts comment documents/howto.html "exact quoted text" "This needs a source." --author Codex
+bun src/agent.ts comment docs/howto.html "exact quoted text" "This needs a source." --author Codex
 ```
 
 If the quoted text appears more than once, choose the 1-based occurrence in document order:
 
 ```bash
-bun src/agent.ts comment documents/howto.html "exact quoted text" "This second mention needs a source." --occurrence 2 --author Codex
+bun src/agent.ts comment docs/howto.html "exact quoted text" "This second mention needs a source." --occurrence 2 --author Codex
 ```
 
 Reply to a comment thread:
 
 ```bash
-bun src/agent.ts reply documents/howto.html thread_abc123 "I updated this section." --author Codex
+bun src/agent.ts reply docs/howto.html thread_abc123 "I updated this section." --author Codex
 ```
 
 Delete one reply without deleting the whole thread:
 
 ```bash
-bun src/agent.ts delete-reply documents/howto.html thread_abc123 message_reply456
+bun src/agent.ts delete-reply docs/howto.html thread_abc123 message_reply456
 ```
 
 Edit an existing comment or reply:
 
 ```bash
-bun src/agent.ts edit-comment documents/howto.html thread_abc123 message_reply456 "Revised wording."
+bun src/agent.ts edit-comment docs/howto.html thread_abc123 message_reply456 "Revised wording."
 ```
 
 Resolve a completed thread:
 
 ```bash
-bun src/agent.ts resolve documents/howto.html thread_abc123
+bun src/agent.ts resolve docs/howto.html thread_abc123
 ```
 
 Apply an HTML update and comment replies together:
 
 ```bash
-bun src/agent.ts apply documents/howto.html /tmp/redline-update.json
+bun src/agent.ts apply docs/howto.html /tmp/redline-update.json
 ```
 
 Payload shape:
