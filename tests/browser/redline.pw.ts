@@ -220,6 +220,53 @@ test("keeps the comment rail synced while the reviewed iframe document scrolls",
   }
 });
 
+test("keeps the active rail card visible in dense comment clusters", async ({ page }) => {
+  const denseThreads = Array.from({ length: 8 }, (_, index) => threadFixture({
+    id: `thread_dense_${index}`,
+    body: `Dense cluster comment ${index}. ${"This reply has enough text to make the card tall. ".repeat(8)}`,
+    quote: `dense anchor ${index}`,
+    prefix: `Cluster lead ${index}. `,
+    suffix: ` continues after ${index}.`,
+    posStart: 200 + index * 32,
+    posEnd: 214 + index * 32,
+  }));
+  const app = await startRedline(
+    page,
+    htmlFixture({
+      body: `
+        <main>
+          <p>Top of the document.</p>
+          <div style="height: 1100px;"></div>
+          ${Array.from({ length: 8 }, (_, index) =>
+            `<p>Cluster lead ${index}. dense anchor ${index} continues after ${index}.</p>`,
+          ).join("\n")}
+          <div style="height: 900px;"></div>
+        </main>
+      `,
+      threads: denseThreads,
+    }),
+  );
+  try {
+    const frame = await openDocument(page, app);
+    const targetId = "thread_dense_5";
+    const highlight = frame.locator(`.redline-highlight[data-thread-id="${targetId}"]`);
+    const card = page.locator(`.thread-card[data-thread-id="${targetId}"]`);
+
+    await highlight.scrollIntoViewIfNeeded();
+    await highlight.click();
+    await expect(card).toHaveClass(/active/);
+    await expect.poll(() => railCardTopIsVisible(page, targetId), { timeout: 5_000 }).toBe(true);
+
+    await page.locator(".comment-rail").evaluate((el) => { (el as HTMLElement).scrollTop = 0; });
+    await card.click();
+    await expect.poll(() => railCardTopIsVisible(page, targetId), { timeout: 5_000 }).toBe(true);
+    await page.waitForTimeout(450);
+    await expect.poll(() => railCardTopIsVisible(page, targetId), { timeout: 5_000 }).toBe(true);
+  } finally {
+    await app.stop();
+  }
+});
+
 async function startRedline(page: Page, html: string): Promise<RedlineInstance> {
   const tempDir = await mkdtemp(path.join(tmpdir(), "redline-browser-"));
   const homeDir = path.join(tempDir, "home");
@@ -262,6 +309,17 @@ async function startRedline(page: Page, html: string): Promise<RedlineInstance> 
     await stop();
     throw error;
   }
+}
+
+async function railCardTopIsVisible(page: Page, threadId: string): Promise<boolean> {
+  return page.evaluate((id) => {
+    const rail = document.querySelector(".comment-rail");
+    const card = document.querySelector(`.thread-card[data-thread-id="${id}"]`);
+    if (!(rail instanceof HTMLElement) || !(card instanceof HTMLElement)) return false;
+    const railRect = rail.getBoundingClientRect();
+    const cardRect = card.getBoundingClientRect();
+    return cardRect.top >= railRect.top - 1 && cardRect.top <= railRect.bottom - 1;
+  }, threadId);
 }
 
 async function openDocument(page: Page, app: RedlineInstance): Promise<Frame> {

@@ -53,6 +53,33 @@ export function centeredRailScrollTop(opts: {
   return Math.max(0, Math.min(centered, maxScrollTop));
 }
 
+// Reveal an item with the smallest rail-only scroll needed. Used for existing
+// thread cards so explicit anchor/comment activation does not fight the anchor
+// alignment pass by unnecessarily re-centering a card that is already visible.
+export function nearestRailScrollTop(opts: {
+  edgePadding?: number;
+  itemHeight?: number;
+  itemViewportTop?: number;
+  maxScrollTop?: number;
+  railClientHeight?: number;
+  railScrollTop?: number;
+  railViewportTop?: number;
+}): number {
+  const edgePadding = Math.max(0, finite(opts.edgePadding ?? 16, 0));
+  const railScrollTop = Math.max(0, finite(opts.railScrollTop ?? 0, 0));
+  const railViewportTop = finite(opts.railViewportTop ?? 0, 0);
+  const itemViewportTop = finite(opts.itemViewportTop ?? railViewportTop, railViewportTop);
+  const railClientHeight = Math.max(0, finite(opts.railClientHeight ?? 0, 0));
+  const itemHeight = Math.max(0, finite(opts.itemHeight ?? 0, 0));
+  const maxScrollTop = Math.max(0, finite(opts.maxScrollTop ?? 0, 0));
+  const itemTop = railScrollTop + itemViewportTop - railViewportTop;
+  const minVisibleTop = Math.max(0, itemTop - edgePadding);
+  const maxVisibleTop = Math.max(0, itemTop + itemHeight + edgePadding - railClientHeight);
+  if (railScrollTop > minVisibleTop) return Math.min(minVisibleTop, maxScrollTop);
+  if (railScrollTop < maxVisibleTop) return Math.min(maxVisibleTop, maxScrollTop);
+  return Math.min(railScrollTop, maxScrollTop);
+}
+
 export function documentSyncedRailContentHeight(opts: {
   contentHeight?: number;
   documentClientHeight?: number;
@@ -71,12 +98,23 @@ export function documentSyncedRailScrollTop(opts: {
   currentRailScrollTop?: number;
   documentScrollTop?: number;
   fallbackScrollTop?: number;
+  focusedItemTop?: number | null;
+  focusedTargetTop?: number | null;
   manualOverride?: boolean;
+  maxScrollTop?: number;
 }): number {
   const currentRailScrollTop = Math.max(0, finite(opts.currentRailScrollTop ?? 0, 0));
   if (opts.manualOverride) return currentRailScrollTop;
   const fallbackScrollTop = Math.max(0, finite(opts.fallbackScrollTop ?? 0, 0));
-  return Math.max(0, finite(opts.documentScrollTop ?? fallbackScrollTop, fallbackScrollTop));
+  const documentScrollTop = Math.max(0, finite(opts.documentScrollTop ?? fallbackScrollTop, fallbackScrollTop));
+  const focusedItemTop = opts.focusedItemTop === null ? NaN : finite(opts.focusedItemTop ?? NaN, NaN);
+  const focusedTargetTop = opts.focusedTargetTop === null ? NaN : finite(opts.focusedTargetTop ?? NaN, NaN);
+  const syncedTop =
+    Number.isFinite(focusedItemTop) && Number.isFinite(focusedTargetTop)
+      ? documentScrollTop + focusedItemTop - focusedTargetTop
+      : documentScrollTop;
+  const maxScrollTop = Math.max(0, finite(opts.maxScrollTop ?? Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY));
+  return Math.max(0, Math.min(syncedTop, maxScrollTop));
 }
 
 // Place every card as close as possible to its desired (anchor-aligned) top

@@ -7,6 +7,7 @@ import {
   composerInsertIndex,
   documentSyncedRailContentHeight,
   documentSyncedRailScrollTop,
+  nearestRailScrollTop,
   stackedRailItemLayout,
 } from "./layout";
 
@@ -51,6 +52,30 @@ describe("centeredRailScrollTop", () => {
       railScrollTop: 0,
       railViewportTop: 52,
     })).toBe(500);
+  });
+});
+
+describe("nearestRailScrollTop", () => {
+  test("keeps an already visible card where it is", () => {
+    expect(nearestRailScrollTop({
+      itemHeight: 220,
+      itemViewportTop: 220,
+      maxScrollTop: 1000,
+      railClientHeight: 620,
+      railScrollTop: 400,
+      railViewportTop: 52,
+    })).toBe(400);
+  });
+
+  test("scrolls only enough to reveal a partially hidden card", () => {
+    expect(nearestRailScrollTop({
+      itemHeight: 220,
+      itemViewportTop: 560,
+      maxScrollTop: 1000,
+      railClientHeight: 620,
+      railScrollTop: 400,
+      railViewportTop: 52,
+    })).toBe(524);
   });
 });
 
@@ -100,6 +125,26 @@ describe("documentSyncedRailScrollTop", () => {
       currentRailScrollTop: 120,
       fallbackScrollTop: 40,
     })).toBe(40);
+  });
+
+  test("accounts for packed card displacement in dense comment regions", () => {
+    expect(documentSyncedRailScrollTop({
+      currentRailScrollTop: 120,
+      documentScrollTop: 900,
+      focusedItemTop: 1600,
+      focusedTargetTop: 1200,
+      maxScrollTop: 2000,
+    })).toBe(1300);
+  });
+
+  test("clamps focused displacement to the rail scroll range", () => {
+    expect(documentSyncedRailScrollTop({
+      currentRailScrollTop: 120,
+      documentScrollTop: 900,
+      focusedItemTop: 2400,
+      focusedTargetTop: 1200,
+      maxScrollTop: 1000,
+    })).toBe(1000);
   });
 });
 

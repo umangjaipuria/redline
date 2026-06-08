@@ -14,6 +14,7 @@ import {
   composerInsertIndex,
   documentSyncedRailContentHeight,
   documentSyncedRailScrollTop,
+  nearestRailScrollTop,
   stackedRailItemLayout,
 } from "./layout";
 
@@ -115,7 +116,7 @@ export function App() {
     railRevealAnimationRef.current = requestAnimationFrame(step);
   }, []);
 
-  const revealRailElement = useCallback((selector: string) => {
+  const revealRailElement = useCallback((selector: string, mode: "center" | "nearest" = "nearest") => {
     railManualScrollRef.current = false;
     if (railRevealAnimationRef.current !== null) {
       cancelAnimationFrame(railRevealAnimationRef.current);
@@ -131,7 +132,8 @@ export function App() {
       const railRect = rail.getBoundingClientRect();
       const elRect = el.getBoundingClientRect();
       const maxTop = Math.max(0, rail.scrollHeight - rail.clientHeight);
-      animateRailScrollTo(rail, centeredRailScrollTop({
+      const scrollTopForElement = mode === "center" ? centeredRailScrollTop : nearestRailScrollTop;
+      animateRailScrollTo(rail, scrollTopForElement({
         itemHeight: el.offsetHeight,
         itemViewportTop: elRect.top,
         maxScrollTop: maxTop,
@@ -151,7 +153,7 @@ export function App() {
   }, [revealRailElement]);
 
   const revealComposerInRail = useCallback(() => {
-    revealRailElement(".composer");
+    revealRailElement(".composer", "center");
   }, [revealRailElement]);
 
   const selectThreadFromHighlight = useCallback(
@@ -517,11 +519,26 @@ export function App() {
       railClientHeight: rail.clientHeight,
     });
     inner.style.height = `${Math.round(syncedContentHeight)}px`;
+    const focusedEntry = scrollMetrics
+      ? focusedRailSyncEntry({
+          activeId: activeThreadRef.current,
+          entries: entries.map((e) => ({
+            id: e.id,
+            targetTop: e.targetViewportTop,
+            top: positions.get(e.id),
+          })),
+          railClientHeight: rail.clientHeight,
+          scrollTop: scrollMetrics.scrollTop,
+        })
+      : null;
     const nextRailScrollTop = documentSyncedRailScrollTop({
       currentRailScrollTop: rail.scrollTop,
       documentScrollTop: scrollMetrics?.scrollTop,
       fallbackScrollTop: positionShift,
+      focusedItemTop: focusedEntry?.top,
+      focusedTargetTop: focusedEntry?.targetTop,
       manualOverride: railManualScrollRef.current,
+      maxScrollTop: syncedContentHeight - rail.clientHeight,
     });
     if (Math.abs(rail.scrollTop - nextRailScrollTop) >= 1) rail.scrollTop = nextRailScrollTop;
   };
@@ -835,6 +852,31 @@ function isFormControl(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   const tag = target.tagName;
   return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target.isContentEditable;
+}
+
+function focusedRailSyncEntry(opts: {
+  activeId: string | null;
+  entries: { id: string; targetTop: number | null; top: number | undefined }[];
+  railClientHeight: number;
+  scrollTop: number;
+}): { targetTop: number; top: number } | null {
+  const candidates = opts.entries
+    .filter((entry): entry is { id: string; targetTop: number; top: number } =>
+      Number.isFinite(entry.targetTop) && Number.isFinite(entry.top),
+    )
+    .map((entry) => ({
+      ...entry,
+      viewportTop: entry.targetTop - opts.scrollTop,
+    }))
+    .filter((entry) => entry.viewportTop >= -32 && entry.viewportTop <= opts.railClientHeight + 32);
+  if (candidates.length === 0) return null;
+  const active = opts.activeId ? candidates.find((entry) => entry.id === opts.activeId) : null;
+  const focused = active ?? candidates.sort(
+    (a, b) =>
+      Math.abs(a.viewportTop - opts.railClientHeight / 2) -
+      Math.abs(b.viewportTop - opts.railClientHeight / 2),
+  )[0]!;
+  return { targetTop: focused.targetTop, top: focused.top };
 }
 
 function basename(path: string): string {
