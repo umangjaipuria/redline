@@ -93,7 +93,12 @@ export class DocumentViewer {
     let text = "";
     let lastBlockAncestor: Element | null = null;
 
-    const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
+    const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT, {
+      // Exclude script/style/hidden text so the client's text layer matches the
+      // server's extractText (the shared canonical-text contract).
+      acceptNode: (candidate) =>
+        isExcludedText(candidate as Text) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
+    });
     let node = walker.nextNode() as Text | null;
     while (node) {
       const block = nearestBlock(node);
@@ -127,11 +132,21 @@ export class DocumentViewer {
     const index = this.index;
     if (!index) return;
 
+    // Resolve every range against the FRESH index first, then wrap from the end
+    // of the document backward. Wrapping splits text nodes, which would
+    // invalidate the index for any later range in the same node — back-to-front
+    // wrapping keeps every lower offset valid because the original (truncated)
+    // node still holds those characters.
+    const planned: { range: Range; threadId: string; state: string; start: number }[] = [];
     for (const anchor of anchors) {
       if (anchor.state === "orphaned" || !anchor.quote) continue;
-      const range = this.locate(index, anchor);
-      if (!range) continue;
-      wrapRange(doc, range, anchor.threadId, anchor.state, anchor.threadId === activeThreadId);
+      const located = this.locate(index, anchor);
+      if (!located) continue;
+      planned.push({ range: located.range, threadId: anchor.threadId, state: anchor.state, start: located.start });
+    }
+    planned.sort((a, b) => b.start - a.start);
+    for (const item of planned) {
+      wrapRange(doc, item.range, item.threadId, item.state, item.threadId === activeThreadId);
     }
   }
 
@@ -178,23 +193,45 @@ export class DocumentViewer {
     doc.body.normalize();
   }
 
-  // Locate an anchor's quote in the current text, disambiguating duplicates by
-  // prefix/suffix agreement. Returns a DOM Range or null when not uniquely found.
-  private locate(index: TextIndex, anchor: AnchorStatus): Range | null {
+  // Locate an anchor's quote in the current text. The server already resolved
+  // the anchor to a concrete range (choosing the right occurrence by context +
+  // position); the client follows that decision by preferring the match nearest
+  // the server's resolved offset, falling back to prefix/suffix context only
+  // when no server range is available. A genuinely ambiguous match with no
+  // discriminator is left unpainted rather than guessed.
+  private locate(index: TextIndex, anchor: AnchorStatus): { range: Range; start: number } | null {
     const matches = findQuoteMatches(index.text, anchor.quote);
     if (matches.length === 0) return null;
+
     let chosen = matches[0]!;
     if (matches.length > 1) {
-      let bestScore = -Infinity;
-      for (const match of matches) {
-        const score = contextScore(index.text, match, anchor.prefix ?? "", anchor.suffix ?? "");
-        if (score > bestScore) {
-          bestScore = score;
-          chosen = match;
+      if (anchor.range) {
+        // The client text layer and the server canonical text use the same
+        // normalization, so the resolved offset aligns closely; pick the nearest
+        // occurrence. This faithfully reproduces the server's occurrence choice.
+        const target = anchor.range.start;
+        chosen = matches.reduce((best, m) =>
+          Math.abs(m.start - target) < Math.abs(best.start - target) ? m : best,
+        );
+      } else {
+        let bestScore = -Infinity;
+        let unique = true;
+        for (const match of matches) {
+          const score = contextScore(index.text, match, anchor.prefix ?? "", anchor.suffix ?? "");
+          if (score > bestScore) {
+            bestScore = score;
+            chosen = match;
+            unique = true;
+          } else if (score === bestScore) {
+            unique = false;
+          }
         }
+        // No server range and context can't disambiguate: do not guess.
+        if (!unique && bestScore <= 0) return null;
       }
     }
-    return this.rangeFor(index, chosen.start, chosen.end);
+    const range = this.rangeFor(index, chosen.start, chosen.end);
+    return range ? { range, start: chosen.start } : null;
   }
 
   private rangeFor(index: TextIndex, start: number, end: number): Range | null {
@@ -268,8 +305,27 @@ const HIGHLIGHT_STYLE = `<style>
   ::selection { background: rgba(196, 54, 29, 0.25); }
 </style>`;
 
+// A strict CSP for the reviewed document, layered on top of the sandbox. The
+// iframe already blocks scripts/forms/popups/top-navigation via its sandbox
+// flags (no allow-scripts/allow-forms); this additionally forbids ALL remote
+// resource loads — images, styles, fonts, media resolve only from the
+// document's own asset route (same-origin) or inline/data/blob. No script can
+// run, nothing beacons out, nothing navigates.
+const CSP_META =
+  `<meta http-equiv="Content-Security-Policy" content="` +
+  `default-src 'none'; ` +
+  `img-src 'self' data: blob:; ` +
+  `media-src 'self' data: blob:; ` +
+  `style-src 'self' 'unsafe-inline'; ` +
+  `font-src 'self' data:; ` +
+  // base-uri 'self' permits the doc-scoped asset <base> we inject (same origin)
+  // while still blocking any author-supplied off-origin base.
+  `base-uri 'self'; form-action 'none'; object-src 'none'; frame-src 'none'; script-src 'none'` +
+  `">`;
+
 function injectBase(html: string, base: string): string {
-  const head = `<base href="${base}">${HIGHLIGHT_STYLE}`;
+  // CSP must come first so it governs every subsequent resource declaration.
+  const head = `${CSP_META}<base href="${base}">${HIGHLIGHT_STYLE}`;
   if (/<head\b[^>]*>/i.test(html)) {
     return html.replace(/<head\b[^>]*>/i, (m) => `${m}${head}`);
   }
@@ -277,6 +333,20 @@ function injectBase(html: string, base: string): string {
     return html.replace(/<html\b[^>]*>/i, (m) => `${m}<head>${head}</head>`);
   }
   return `${head}${html}`;
+}
+
+const EXCLUDED_TEXT_ANCESTORS = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE"]);
+
+// Text inside script/style/noscript/template, or inside a display:none /
+// hidden subtree, is not part of the canonical anchoring text.
+function isExcludedText(node: Text): boolean {
+  let current = node.parentElement;
+  while (current) {
+    if (EXCLUDED_TEXT_ANCESTORS.has(current.tagName)) return true;
+    if (current.hasAttribute("hidden")) return true;
+    current = current.parentElement;
+  }
+  return false;
 }
 
 function nearestBlock(node: Node): Element | null {

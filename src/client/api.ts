@@ -65,16 +65,30 @@ export const api = {
       body,
       expectedVersion,
     }),
-  deleteReply: (docId: string, threadId: string, messageId: string) =>
-    send<DocumentStateResponse>("DELETE", `/api/docs/${docId}/comments/${threadId}/replies/${messageId}`),
-  deleteThread: (docId: string, threadId: string) =>
-    send<DocumentStateResponse>("DELETE", `/api/docs/${docId}/comments/${threadId}`),
-  reanchor: (docId: string, threadId: string, quote: string, occurrence?: number) =>
-    send<DocumentStateResponse>("POST", `/api/docs/${docId}/anchors/${threadId}/reanchor`, { quote, occurrence }),
+  deleteReply: (docId: string, threadId: string, messageId: string, expectedVersion?: string) =>
+    send<DocumentStateResponse>(
+      "DELETE",
+      `/api/docs/${docId}/comments/${threadId}/replies/${messageId}${versionQuery(expectedVersion)}`,
+    ),
+  deleteThread: (docId: string, threadId: string, expectedVersion?: string) =>
+    send<DocumentStateResponse>(
+      "DELETE",
+      `/api/docs/${docId}/comments/${threadId}${versionQuery(expectedVersion)}`,
+    ),
+  reanchor: (docId: string, threadId: string, quote: string, occurrence?: number, expectedVersion?: string) =>
+    send<DocumentStateResponse>("POST", `/api/docs/${docId}/anchors/${threadId}/reanchor`, {
+      quote,
+      occurrence,
+      expectedVersion,
+    }),
   agentUpdate: (docId: string, update: AgentUpdate) =>
     send<DocumentStateResponse>("POST", `/api/docs/${docId}/agent/update`, update),
 };
 
 export function assetsBase(docId: string): string {
   return `/api/docs/${docId}/assets/`;
+}
+
+function versionQuery(expectedVersion?: string): string {
+  return expectedVersion ? `?expectedVersion=${encodeURIComponent(expectedVersion)}` : "";
 }

@@ -59,6 +59,14 @@ describe("render", () => {
     expect(view.html).not.toContain("onclick");
     expect(view.html).not.toContain("javascript:");
   });
+
+  test("strips nested frames, plugins, and author base tags", () => {
+    const dirty =
+      `<body><iframe src="http://evil"></iframe><object data="x.swf"></object>` +
+      `<embed src="y"><base href="http://evil/"><meta http-equiv="refresh" content="0;url=http://evil"></body>`;
+    const view = htmlAdapter.render(dirty);
+    expect(view.html).not.toMatch(/<iframe|<object|<embed|<base|http-equiv/i);
+  });
 });
 
 describe("readState / writeState round-trip", () => {

@@ -141,12 +141,24 @@ interface ServerTarget {
   docId: string;
 }
 
-// The server hosting this file's canonical path, if one has it open.
+// The server hosting this file's canonical path, if one has it open. When more
+// than one live server claims the same path, the freshest wins deterministically
+// (findServerForPath sorts by startedAt) and we warn — a stale entry or a second
+// server shouldn't silently misroute writes.
 function serverTargetFor(canonical: string, deps: CliDeps): ServerTarget | undefined {
-  const record = findServerForPath(canonical, deps.serversDir);
-  if (!record) return undefined;
-  const doc = record.docs.find((entry) => entry.path === canonical);
-  if (!doc) return undefined;
+  const claimants = readServerRecords(deps.serversDir).filter((record) =>
+    record.docs.some((entry) => entry.path === canonical),
+  );
+  if (claimants.length === 0) return undefined;
+  if (claimants.length > 1) {
+    console.warn(
+      `Warning: ${claimants.length} servers report ${canonical} open (${claimants
+        .map((r) => r.url)
+        .join(", ")}). Routing to the most recently started (${claimants[0]!.url}).`,
+    );
+  }
+  const record = claimants[0]!;
+  const doc = record.docs.find((entry) => entry.path === canonical)!;
   return { url: record.url, docId: doc.docId };
 }
 

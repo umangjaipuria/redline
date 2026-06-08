@@ -81,6 +81,9 @@ export interface DocumentStateResponse {
   threads: ThreadModel[];
   anchors: AnchorStatusModel[];
   summary: ReviewSummary;
+  // Present when the embedded state block could not be parsed: the document is
+  // shown with no review state and writes are refused until it's resolved.
+  warning?: string;
 }
 
 // Compact agent index entry (no message bodies except the last).

@@ -14,6 +14,7 @@ import {
   reanchor,
   readDocument,
   ConflictError,
+  ValidationError,
   type DocumentView,
 } from "../app";
 import type {
@@ -205,13 +206,16 @@ async function handleDocScoped(
       session.path,
       decodeURIComponent(deleteReplyMatch[1]!),
       decodeURIComponent(deleteReplyMatch[2]!),
+      { expectedVersion: expectedVersionFrom(request) },
     );
     return mutated(manager, session, view, "comment.deleted");
   }
 
   const deleteThreadMatch = rest.match(/^comments\/([^/]+)$/);
   if (deleteThreadMatch && request.method === "DELETE") {
-    const view = deleteThread(session.path, decodeURIComponent(deleteThreadMatch[1]!));
+    const view = deleteThread(session.path, decodeURIComponent(deleteThreadMatch[1]!), {
+      expectedVersion: expectedVersionFrom(request),
+    });
     return mutated(manager, session, view, "comment.deleted");
   }
 
@@ -270,6 +274,7 @@ function stateResponse(session: DocumentSession, view: DocumentView): DocumentSt
     summary: view.summary,
   };
   if (view.title) response.title = view.title;
+  if (view.warning) response.warning = view.warning;
   return response;
 }
 
@@ -282,6 +287,10 @@ function mutated(
 ): Response {
   manager.applyMutation(session, view, event);
   return json(stateResponse(session, view));
+}
+
+function expectedVersionFrom(request: Request): string | undefined {
+  return new URL(request.url).searchParams.get("expectedVersion") ?? undefined;
 }
 
 function parseRange(input: string | null): { start: number; end: number } | undefined {
@@ -372,10 +381,23 @@ function serveDocAsset(session: DocumentSession, relativePath: string): Response
   const decoded = decodeURIComponent(relativePath);
   const documentDir = path.dirname(session.path);
   const absolute = path.resolve(documentDir, decoded);
-  if (!decoded || !isInside(documentDir, absolute) || !fs.existsSync(absolute) || !fs.statSync(absolute).isFile()) {
+  // realpath both sides so a symlink inside the document directory can't point
+  // the response at a file outside it.
+  if (!decoded || !fs.existsSync(absolute) || !fs.statSync(absolute).isFile() || !realInside(documentDir, absolute)) {
     return new Response("Not found", { status: 404 });
   }
   return new Response(Bun.file(absolute), { headers: { "Cache-Control": "no-store" } });
+}
+
+// True when `child` resolves (through symlinks) to a path inside `parent`.
+function realInside(parent: string, child: string): boolean {
+  try {
+    const realParent = fs.realpathSync(parent);
+    const realChild = fs.realpathSync(child);
+    return isInside(realParent, realChild);
+  } catch {
+    return false;
+  }
 }
 
 // --- error mapping -------------------------------------------------------
@@ -402,7 +424,8 @@ async function readJson<T>(request: Request): Promise<T> {
   try {
     return (await request.json()) as T;
   } catch {
-    throw new Error("Request body must be valid JSON.");
+    // Malformed client payload is a 400, not a 500.
+    throw new ValidationError("Request body must be valid JSON.");
   }
 }
 
@@ -424,6 +447,10 @@ function sseHeaders(): Record<string, string> {
     "Cache-Control": "no-store",
     Connection: "keep-alive",
   };
+}
+
+function isLoopbackHost(host: string): boolean {
+  return host === "127.0.0.1" || host === "localhost" || host === "::1" || host === "::ffff:127.0.0.1";
 }
 
 function isLoopbackOrigin(request: Request): boolean {
@@ -484,6 +511,24 @@ export function startServer(options: ServerOptions): void {
   });
 
   serverUrl = server.url.toString();
+  // The API reads/writes files on disk and is unauthenticated by design (the
+  // plan scopes auth/multi-tenancy out). That is safe only on loopback: a
+  // request with no Origin (a non-browser client) is trusted, which on a
+  // non-loopback bind would let anything on the network drive these endpoints.
+  // Refuse to start beyond loopback unless explicitly acknowledged.
+  if (!isLoopbackHost(options.host)) {
+    if (process.env.REDLINE_ALLOW_REMOTE !== "1") {
+      console.error(
+        `Refusing to bind ${options.host}: the Redline API is unauthenticated and would be exposed to the network. ` +
+          `Bind 127.0.0.1 (default), or set REDLINE_ALLOW_REMOTE=1 if you have put auth in front of it.`,
+      );
+      server.stop(true);
+      process.exit(1);
+    }
+    console.warn(
+      `WARNING: bound to ${options.host}. The Redline API is unauthenticated — anyone who can reach this host can read/write files. Put auth in front of it.`,
+    );
+  }
   syncRegistry();
   registerCleanup(() => {
     manager.stopWatching();

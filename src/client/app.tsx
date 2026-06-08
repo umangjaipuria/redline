@@ -43,6 +43,9 @@ export function App() {
 
   const refreshFrom = useCallback((next: DocumentStateResponse) => {
     setState(next);
+    if (next.warning) {
+      setNotice({ title: "Embedded review state could not be read", body: next.warning });
+    }
     const viewer = viewerRef.current;
     if (!viewer) return;
     if (next.renderedHtml !== lastRenderedRef.current) {
@@ -294,12 +297,14 @@ export function App() {
               withWrite(() => api.editMessage(docId, threadId, messageId, text, state.version))
             }
             onDeleteReply={(threadId, messageId) =>
-              withWrite(() => api.deleteReply(docId, threadId, messageId))
+              withWrite(() => api.deleteReply(docId, threadId, messageId, state.version))
             }
-            onDeleteThread={(threadId) => withWrite(() => api.deleteThread(docId, threadId))}
+            onDeleteThread={(threadId) => withWrite(() => api.deleteThread(docId, threadId, state.version))}
             onReanchor={(threadId) =>
               selection
-                ? withWrite(() => api.reanchor(docId, threadId, selection.quote)).then(() => setSelection(null))
+                ? withWrite(() => api.reanchor(docId, threadId, selection.quote, undefined, state.version)).then(() =>
+                    setSelection(null),
+                  )
                 : Promise.resolve()
             }
           />

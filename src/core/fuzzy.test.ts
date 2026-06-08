@@ -32,6 +32,17 @@ describe("fuzzyMatch", () => {
     expect(fuzzyMatch("hello", "hello", 0)).toEqual({ index: 0, score: 1 });
   });
 
+  test("long pattern (>32 chars) with a mid-edit still matches near its location", () => {
+    const text =
+      "Intro sentence. The quarterly report shows that revenue and retention both improved across every region last year. Outro sentence.";
+    const pattern = "revenue and retention both improved across every region"; // > 32 chars
+    const edited = text.replace("both improved", "both improved substantially");
+    const result = fuzzyMatch(edited, pattern, edited.indexOf("revenue"));
+    expect(result.index).toBeGreaterThanOrEqual(0);
+    expect(result.score).toBeGreaterThan(0.6);
+    expect(Math.abs(result.index - edited.indexOf("revenue"))).toBeLessThan(5);
+  });
+
   test("location bias picks the nearer of two identical candidates", () => {
     const text = "match here ... filler ... match here";
     const near = fuzzyMatch(text, "match here", 0);

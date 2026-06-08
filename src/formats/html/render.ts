@@ -21,6 +21,11 @@ export function renderHtml(raw: string): RenderedView {
   );
   // Strip <meta http-equiv="refresh"> to block timed navigation.
   html = html.replace(/<meta\b[^>]*http-equiv\s*=\s*("refresh"|'refresh'|refresh)[^>]*>/gi, "");
+  // Remove active/embedding elements outright (defense in depth beside the
+  // iframe sandbox + CSP): nested frames, plugins, and any author <base> that
+  // would fight the asset base we inject at view time.
+  html = html.replace(/<(iframe|object|embed|frame|frameset)\b[^>]*>[\s\S]*?<\/\1>/gi, "");
+  html = html.replace(/<(iframe|object|embed|frame|frameset|base)\b[^>]*\/?>/gi, "");
 
   return { html, title: extractTitle(raw) };
 }

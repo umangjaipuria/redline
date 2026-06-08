@@ -145,6 +145,18 @@ describe("document-scoped state + comments", () => {
     expect((await res.json()).current).toBeDefined();
   });
 
+  test("malformed JSON body returns 400, not 500", async () => {
+    const { docId } = await openDoc();
+    const res = await handler(
+      new Request(`http://127.0.0.1/api/docs/${docId}/comments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{ not json",
+      }),
+    );
+    expect(res.status).toBe(400);
+  });
+
   test("unknown docId returns 404 with re-resolve guidance", async () => {
     const res = await handler(req("GET", "/api/docs/doc_not-a-real-id/state"));
     expect(res.status).toBe(404);

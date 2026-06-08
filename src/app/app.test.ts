@@ -114,14 +114,14 @@ describe("replies, edits, deletes", () => {
 
 describe("content is never mutated", () => {
   test("body bytes are unchanged; only head gains the marker + block", () => {
+    const canonicalBefore = readDocument(file).canonicalText;
     createComment(file, { message: "x", quote: "redesign" });
     const written = fs.readFileSync(file, "utf8");
     const body = (s: string) => s.slice(s.indexOf("<body"), s.indexOf("</body>"));
     expect(body(written)).toBe(body(DOC));
-    // Canonical text (what anchoring sees) is identical before and after.
-    expect(readDocument(file).canonicalText).toBe(
-      readDocument(file).canonicalText, // stable across reads
-    );
+    // Canonical text (what anchoring sees) is identical before and after the
+    // write — the comment touched only the head's marker + state block.
+    expect(readDocument(file).canonicalText).toBe(canonicalBefore);
     expect(written).toContain('id="redline-state"');
     expect(written).toContain('name="redline-agent-guide"');
   });
@@ -162,6 +162,34 @@ describe("reconcile + reanchor after external edits", () => {
     const { view: healedView, healed } = reconcileDocument(file);
     expect(healed).toBe(true);
     expect(healedView.updatedAt).toBe(before);
+  });
+});
+
+describe("merge-on-write (no expectedVersion)", () => {
+  test("a comment added between read and a self-heal write is not dropped", () => {
+    // Seed two threads, then orphan-free edit elsewhere so reconcile heals hints.
+    createComment(file, { message: "first", quote: "metrics are accurate" });
+    const second = createComment(file, { message: "second", quote: "redesign" });
+    expect(second.threads).toHaveLength(2);
+
+    // External content edit shifts positions so reconcile will want to heal.
+    fs.writeFileSync(
+      file,
+      fs.readFileSync(file, "utf8").replace("Quarterly review", "Q3 quarterly review"),
+      "utf8",
+    );
+    const { view } = reconcileDocument(file);
+    // Both threads survive the self-heal write.
+    expect(view.threads).toHaveLength(2);
+  });
+
+  test("agent batch and a direct comment both land (id-keyed merge)", () => {
+    const seed = createComment(file, { message: "seed", quote: "redesign" });
+    const update = applyAgentUpdate(file, {
+      comments: [{ quote: "metrics are accurate", body: "from agent" }],
+    });
+    expect(update.threads).toHaveLength(2);
+    expect(update.threads.some((t) => t.id === seed.threads[0]!.id)).toBe(true);
   });
 });
 

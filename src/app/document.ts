@@ -120,36 +120,61 @@ export interface MutationResult {
 // Writes atomically (temp + rename). `expectedVersion`, when given, is the
 // optimistic-concurrency guard — a mismatch is a ConflictError carrying the
 // current view.
+const MAX_WRITE_ATTEMPTS = 5;
+
 export function mutateState(
   absolutePath: string,
   expectedVersion: string | undefined,
   mutate: (ctx: MutationContext) => MutationResult,
 ): DocumentView {
   const adapter = requireAdapterForPath(absolutePath);
-  const content = readFile(absolutePath);
-  const currentVersion = versionFor(content);
-  if (expectedVersion !== undefined && expectedVersion !== currentVersion) {
-    throw new ConflictError(
-      "The document changed before this write completed. Re-read its current state and retry.",
-      buildView(absolutePath, content),
-    );
-  }
 
-  const state = readStateForWrite(content, absolutePath);
-  const canonicalText = adapter.extractText(content);
-  const result = mutate({ threads: state.threads, canonicalText });
-  const bump = result.bumpUpdatedAt !== false;
+  // Optimistic-concurrency loop. Each attempt reads the CURRENT bytes, runs the
+  // mutation against the threads on disk now (so concurrent adds/edits by id
+  // merge cleanly), re-applies only our state block onto those bytes (so an
+  // external CONTENT edit is preserved), then re-reads immediately before the
+  // atomic rename and bails to a retry if the file moved underneath us. This is
+  // the CAS the plan asks for — no OS locks, which an external agent wouldn't
+  // honor anyway.
+  for (let attempt = 0; attempt < MAX_WRITE_ATTEMPTS; attempt += 1) {
+    const content = readFile(absolutePath);
+    const currentVersion = versionFor(content);
+    if (expectedVersion !== undefined && expectedVersion !== currentVersion) {
+      throw new ConflictError(
+        "The document changed before this write completed. Re-read its current state and retry.",
+        buildView(absolutePath, content),
+      );
+    }
 
-  const nextState: EmbeddedState = {
-    schemaVersion: SCHEMA_VERSION,
-    updatedAt: bump ? new Date().toISOString() : state.updatedAt,
-    threads: result.threads,
-  };
-  const nextContent = adapter.writeState(content, nextState);
-  if (nextContent !== content) {
+    const state = readStateForWrite(content, absolutePath);
+    const canonicalText = adapter.extractText(content);
+    const result = mutate({ threads: state.threads, canonicalText });
+    const bump = result.bumpUpdatedAt !== false;
+
+    const nextState: EmbeddedState = {
+      schemaVersion: SCHEMA_VERSION,
+      updatedAt: bump ? new Date().toISOString() : state.updatedAt,
+      threads: result.threads,
+    };
+    const nextContent = adapter.writeState(content, nextState);
+    if (nextContent === content) {
+      return buildView(absolutePath, content); // no-op write (e.g. idle self-heal)
+    }
+
+    // CAS guard: if the bytes changed since we read them, another writer (a
+    // second Redline or a direct content edit) slipped in — retry against the
+    // fresh bytes so we merge instead of clobber.
+    if (readFile(absolutePath) !== content) {
+      continue;
+    }
     writeFileAtomic(absolutePath, nextContent);
+    return buildView(absolutePath, nextContent);
   }
-  return buildView(absolutePath, nextContent);
+
+  throw new ConflictError(
+    "The document is being written concurrently; could not complete the write. Retry.",
+    buildView(absolutePath, readFile(absolutePath)),
+  );
 }
 
 // Reconcile + lazily persist refreshed anchor hints. Returns the view and
@@ -160,24 +185,24 @@ export function reconcileDocument(absolutePath: string): {
   view: DocumentView;
   healed: boolean;
 } {
-  const content = readFile(absolutePath);
-  let state: EmbeddedState;
+  let healed = false;
   try {
-    state = requireAdapterForPath(absolutePath).readState(content) ?? emptyState();
-  } catch {
-    // Malformed block: nothing to heal; just return the (warning-bearing) view.
-    return { view: buildView(absolutePath, content), healed: false };
+    // The heal runs INSIDE mutateState, as a transform over the threads on disk
+    // now — never a stale snapshot. A comment added between read and write
+    // therefore can't be dropped: it's part of ctx.threads when we reconcile.
+    const view = mutateState(absolutePath, undefined, (ctx) => {
+      const result = reconcile(ctx.canonicalText, ctx.threads);
+      healed = result.changed;
+      return { threads: result.healedThreads, bumpUpdatedAt: false };
+    });
+    return { view, healed };
+  } catch (error) {
+    if (error instanceof MalformedDocumentError) {
+      // Can't heal an unparseable block; return the warning-bearing view.
+      return { view: readDocument(absolutePath), healed: false };
+    }
+    throw error;
   }
-  const canonicalText = requireAdapterForPath(absolutePath).extractText(content);
-  const { changed, healedThreads } = reconcile(canonicalText, state.threads);
-  if (!changed) {
-    return { view: buildView(absolutePath, content), healed: false };
-  }
-  const view = mutateState(absolutePath, undefined, () => ({
-    threads: healedThreads,
-    bumpUpdatedAt: false,
-  }));
-  return { view, healed: true };
 }
 
 export function resolveAbsolutePath(input: string): string {
