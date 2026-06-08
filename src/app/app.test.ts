@@ -16,6 +16,7 @@ import {
   ConflictError,
   NotFoundError,
   AnchorError,
+  MalformedDocumentError,
 } from "./index";
 import { agentCommentIndex, agentThread } from "./agent-reads";
 
@@ -204,6 +205,34 @@ describe("merge-on-write (no expectedVersion)", () => {
     });
     expect(update.threads).toHaveLength(2);
     expect(update.threads.some((t) => t.id === seed.threads[0]!.id)).toBe(true);
+  });
+});
+
+describe("malformed embedded state", () => {
+  function writeBrokenBlock(): void {
+    const broken = DOC.replace(
+      "</head>",
+      '<script type="application/json" id="redline-state">{ not valid json </script></head>',
+    );
+    fs.writeFileSync(file, broken, "utf8");
+  }
+
+  test("read surfaces a warning and degrades to no review state", () => {
+    writeBrokenBlock();
+    const view = readDocument(file);
+    expect(view.warning).toBeDefined();
+    expect(view.threads).toHaveLength(0);
+    // The document is still viewable.
+    expect(view.renderedHtml).toContain("Quarterly review");
+  });
+
+  test("a write refuses rather than clobbering an unparseable block", () => {
+    writeBrokenBlock();
+    expect(() => createComment(file, { message: "x", quote: "redesign" })).toThrow(
+      MalformedDocumentError,
+    );
+    // The broken block is left untouched on disk.
+    expect(fs.readFileSync(file, "utf8")).toContain("{ not valid json");
   });
 });
 

@@ -157,6 +157,18 @@ describe("document-scoped state + comments", () => {
     expect(res.status).toBe(400);
   });
 
+  test("malformed embedded state surfaces a warning in /state", async () => {
+    const broken = DOC.replace(
+      "</head>",
+      '<script type="application/json" id="redline-state">{ broken </script></head>',
+    );
+    fs.writeFileSync(file, broken, "utf8");
+    const { docId } = await openDoc();
+    const state: DocumentStateResponse = await (await handler(req("GET", `/api/docs/${docId}/state`))).json();
+    expect(state.warning).toBeDefined();
+    expect(state.threads).toHaveLength(0);
+  });
+
   test("unknown docId returns 404 with re-resolve guidance", async () => {
     const res = await handler(req("GET", "/api/docs/doc_not-a-real-id/state"));
     expect(res.status).toBe(404);

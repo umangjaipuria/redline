@@ -375,15 +375,17 @@ function absoluteAssetSource(base: string): string {
   }
 }
 
-const EXCLUDED_TEXT_ANCESTORS = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE"]);
+// EXACTLY what the server's extractText excludes — script and style — so the
+// client's text layer and the server's canonical text agree (the shared
+// normalization contract). Excluding more here (noscript/template/hidden) than
+// the server does would re-introduce the very offset drift this is meant to
+// avoid, so the two sets must stay identical.
+const EXCLUDED_TEXT_ANCESTORS = new Set(["SCRIPT", "STYLE"]);
 
-// Text inside script/style/noscript/template, or inside a display:none /
-// hidden subtree, is not part of the canonical anchoring text.
 function isExcludedText(node: Text): boolean {
   let current = node.parentElement;
   while (current) {
     if (EXCLUDED_TEXT_ANCESTORS.has(current.tagName)) return true;
-    if (current.hasAttribute("hidden")) return true;
     current = current.parentElement;
   }
   return false;

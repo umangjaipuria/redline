@@ -97,6 +97,35 @@ describe("resolveAnchor — edits", () => {
     expect(resolution.quote.includes("very")).toBe(true);
   });
 
+  test("a moderate edit inside the quote lands in needs-review", () => {
+    // Change a meaningful fraction of the quote while leaving its surroundings
+    // intact → confidence falls into the 0.6–0.9 band.
+    const anchor = anchorFor("loads quickly and the metrics");
+    const edited = BASE.replace(
+      "loads quickly and the metrics",
+      "loads quickly though several of the metrics",
+    );
+    const resolution = resolveAnchor(edited, anchor);
+    expect(resolution.state).toBe("needs-review");
+    expect(resolution.confidence!).toBeGreaterThanOrEqual(0.6);
+    expect(resolution.confidence!).toBeLessThan(0.9);
+  });
+
+  test("a duplicate created elsewhere after anchoring does not steal the anchor", () => {
+    // Anchor to the unique first 'dashboard', then introduce a second identical
+    // phrase elsewhere. Context must keep the original location.
+    const anchor = anchorFor("new dashboard");
+    const edited = BASE.replace(
+      "Users praised the redesign.",
+      "Users praised the new dashboard redesign.",
+    );
+    const resolution = resolveAnchor(edited, anchor);
+    expect(resolution.state).toBe("anchored");
+    // Resolved at the ORIGINAL occurrence (preceded by "shipped the").
+    const before = edited.slice(0, resolution.range!.start);
+    expect(before.trimEnd().endsWith("shipped the")).toBe(true);
+  });
+
   test("wholesale rewrite of the region orphans the anchor", () => {
     const anchor = anchorFor("metrics are accurate");
     const edited = BASE.replace(
