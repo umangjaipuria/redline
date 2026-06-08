@@ -1,0 +1,480 @@
+<!doctype html>
+<html lang="en"><head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Redline Rewrite Plan</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body {
+      max-width: 50rem;
+      margin: 3rem auto;
+      padding: 0 1.5rem;
+      font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color: #1a1a1a;
+    }
+    h1 { font-size: 2rem; line-height: 1.2; margin: 0 0 1rem; }
+    h2 { font-size: 1.4rem; margin: 2.5rem 0 0.75rem; padding-bottom: 0.3rem; border-bottom: 1px solid #ddd; }
+    h3 { font-size: 1.1rem; margin: 1.75rem 0 0.5rem; }
+    p, li { margin: 0.5rem 0; }
+    ul, ol { padding-left: 1.5rem; }
+    code { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 0.9em; background: #f0f0f0; padding: 0.1em 0.3em; border-radius: 3px; }
+    pre { background: #f6f6f6; border: 1px solid #e2e2e2; border-radius: 6px; padding: 1rem; overflow-x: auto; }
+    pre code { background: none; padding: 0; }
+    table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+    th, td { border: 1px solid #ddd; padding: 0.5rem 0.75rem; text-align: left; vertical-align: top; }
+    th { background: #f6f6f6; }
+    blockquote { margin: 1rem 0; padding: 0.25rem 1rem; border-left: 3px solid #ccc; color: #444; }
+  </style>
+    <meta name="redline-agent-guide" content="Redline document. Agents: use the redline-review skill; comments live in #redline-state and data-redline-anchor spans.">
+  </head>
+<body>
+  <h1>Redline Rewrite Plan</h1>
+
+  <h2>For the implementer (start here)</h2>
+  <p>This document is the spec. It is a <strong>full rewrite</strong>, HTML-first. Read it top to bottom first; the <em>Locked decisions</em>, <em>Anchoring &amp; reconciliation model</em>, <em>Multiple documents</em>, and <em>Server &amp; agent API</em> sections are binding (the <em>Data shapes</em> section is an explicitly non-binding starting suggestion — see its note).</p>
+  <ul>
+    <li><strong>Build the new layout</strong> under <code>src/</code> (<code>core</code>, <code>formats/html</code>, <code>app</code>, <code>server</code>, <code>agent</code>, <code>client</code>, <code>shared</code>); <code>public/</code> = static assets only; client is Preact bundled by <code>Bun.build</code> to <code>dist/</code> (gitignored).</li>
+    <li><strong>Read the current code as reference, not to extend:</strong> <code>src/state.ts</code> (embedded state + quote/occurrence anchoring + source-preserving mutation), <code>public/app-helpers.js</code> (shared quote matching — the format-neutral seed of core anchoring), <code>public/app.js</code> (current vanilla client), and <code>src/*.test.ts</code> (the behavior spec to port).</li>
+    <li><strong>Key changes from today's code:</strong> replace <code>quote + occurrence</code> with the selector model (quote + prefix/suffix + position); stop writing inline <code>data-redline-anchor</code> spans to disk (highlight at render instead); rename "resolve" to thread delete; address documents by <code>docId</code>. The embedded state block therefore gets a new <code>schemaVersion</code>.</li>
+    <li><strong>Do not migrate old Redline files</strong> — ignore them. Remove the old <code>src/*.ts</code> + <code>public/app.js</code> at the final gate, after the new path passes the ported tests.</li>
+    <li>Project conventions (commit policy, etc.) are in your loaded memory, not here.</li>
+  </ul>
+
+  <h2>Product framing</h2>
+  <p>Redline is a <strong>reviewing-and-commenting app, not a document owner.</strong> Someone else — the agent, or the user's own tooling — authors and maintains the file. Redline exists only for reviewing, commenting, and user↔agent collaboration on top of that file.</p>
+  <p>Three consequences follow, and they drive every decision below:</p>
+  <ol>
+    <li><strong>State lives inside the one file.</strong> No sidecar. The reviewed file stays a single, fully portable artifact that carries its own comments wherever it goes.</li>
+    <li><strong>Redline disturbs the content as little as physically possible.</strong> The only bytes it ever writes are its embedded review-state block (and, at most, a one-line discovery marker — see <em>Embedded state block</em>). It never reformats or restructures the document.</li>
+    <li><strong>Redline is a participant, never a gatekeeper.</strong> The file on disk is the shared source of truth. The agent may edit it directly at any time, with or without Redline running. Redline reconciles; it does not lock the file or become the sole editor (it is <em>not</em> Google Docs).</li>
+  </ol>
+  <p>The rewrite exists to make these true <em>before</em> the project is open-sourced and <em>before</em> files in the wild create a migration burden. Old Redline-authored files are explicitly <strong>not</strong> migrated — we can ignore them and move on. This is the cheapest this refactor will ever be.</p>
+
+  <h2>Roadmap this unlocks</h2>
+  <ul>
+    <li><strong>More commentable formats</strong> (Markdown, code, etc.) — HTML is the first adapter, not the architecture.</li>
+    <li><strong>Simultaneous editing</strong> — at least one user + one agent at once (agent responding while the user comments), more later.</li>
+    <li><strong>Self-contained downloadable binary</strong> — clone-free, just-run distribution.</li>
+    <li><strong>Open source</strong> — a clean, contributable core with a documented adapter contract.</li>
+  </ul>
+
+  <h2>Locked decisions</h2>
+  <p>These were settled in design discussion and are not open for re-litigation in implementation:</p>
+  <ol>
+    <li><strong>Embedded state, no sidecar.</strong> Review state is serialized into one block inside the file (HTML: <code>&lt;script type="application/json"&gt;</code>; Markdown: a trailing HTML comment; code: a language comment). This block (plus, at most, a one-line discovery marker) is the <em>only</em> region Redline writes.</li>
+    <li><strong>No inline anchor markers on disk.</strong> Today's <code>&lt;span data-redline-anchor&gt;</code> wrappers are dropped. Highlights are rendered at view time, not persisted. The saved file's content is byte-identical except for the single state block.</li>
+    <li><strong>Fuzzy, context-aware anchoring.</strong> Anchors are stored as redundant selectors (quote + prefix/suffix context + position hint) and resolved with a fallback cascade, not exact-match-or-die. (Full model below.) This replaces the current <code>quote + occurrence</code> scheme.</li>
+    <li><strong></strong><strong>Redline owns reconciliation, automatically.</strong> The agent stays anchor-blind: it edits text, Redline re-resolves anchors on load / external change / render.</li>
+    <li><strong>Region ownership.</strong> Content = owned by the document's author (agent directly, or user via the later text-edit feature). State block = owned by Redline. Concurrent writers to <em>different</em> regions never clobber each other.</li>
+    <li><strong>User content editing: A now, B later.</strong>
+      <ul>
+        <li><strong>A (now):</strong> user is a commenter; the agent owns all content. Redline never mutates content.</li>
+        <li><strong>B (later, additive):</strong> re-introduce the "change a word/phrase" affordance as a <em>locate-and-replace text op</em> (reusing the anchor locate machinery), not as a whole-document reserialize.</li>
+        <li>The current whole-document serialize + <code>PUT /api/document</code> content path is <strong>removed</strong> regardless — it fights both minimal-disturbance and multi-format.</li>
+      </ul>
+    </li>
+    <li><strong>Optional live coordination, never required.</strong> When a Redline server is already running for a file (tracked via the server registry), the agent CLI may route ops through it for presence and atomic anchor updates. With no server running, the CLI writes the file directly. The direct-write path is the floor; coordination is an optimization on top.</li>
+    <li><strong>Client leaves <code>public/</code>.</strong> Source lives in <code>src/client</code>; build output goes to a dedicated dir and is embeddable into the binary. <code>public/</code> holds static assets only (fonts, favicon). No app code or built bundles under <code>public/</code>.</li>
+    <li><strong>Multiple documents per server (first-class).</strong> One server instance holds many open documents at once — keyed internally by canonical file path, addressed over the API by an opaque <code>docId</code>. Routes, events, and assets are document-scoped. Single-document is just the one-entry case. (Cheap because review state lives in the files; see <em>Multiple documents</em>.)</li>
+  </ol>
+
+  <h2>Non-goals / deferred</h2>
+  <ul>
+    <li><strong>Sidecar state</strong> — excluded by the product framing, not just out of scope.</li>
+    <li><strong>CRDT / OT same-region co-editing</strong> — fuzzy re-anchoring + graceful orphaning is the v1 concurrency floor. Sticky CRDT positions are a later investment, only if true character-level co-editing on the same text is wanted.</li>
+    <li><strong>User content editing (B)</strong> — designed-for but not built in this rewrite.</li>
+    <li><strong>Migration of old Redline files</strong> — not supported; not built.</li>
+    <li><strong>Non-embeddable formats</strong> — every supported format must be able to carry its own state block in a comment/ignored region.</li>
+  </ul>
+
+  <h2>Architecture overview</h2>
+  <p>Top-level subsystems:</p>
+  <ul>
+    <li><code>src/core</code> — format-neutral review model: threads, messages, authors/body normalization, the <strong>anchor selector model and fuzzy resolution cascade</strong>, and reconciliation. No knowledge of HTML, files, or transport.</li>
+    <li><code>src/formats/&lt;id&gt;</code> — per-format adapters. <code>html</code> first. Each adapter knows how to extract anchoring text, render for viewing, and read/write <em>only</em> the embedded state block.</li>
+    <li><code>src/app</code> — use-case commands composed from core + adapter: open/close document, create comment, reply, edit message, delete thread, re-anchor, apply agent update, reconcile-on-change. Each command is per-document; the server's session map supplies the document context.</li>
+    <li><code>src/server</code> — Bun HTTP server holding a <strong><code>Map&lt;docId, DocumentSession&gt;</code></strong> (per-document path, version, file watcher, SSE subscribers); doc-addressed route handlers, per-document SSE channels, the server registry (lists a server's open docs), static serving of the built client + per-document assets, and the file picker.</li>
+    <li><code>src/agent</code> — CLI parser and command adapters; routes through a live server when present (via registry), else applies directly.</li>
+    <li><code>src/client</code> — the review UI (app shell + imperative iframe document viewer). Built to a dedicated output dir, not <code>public/</code>.</li>
+    <li><code>src/shared</code> — DTOs shared across server / client / agent boundaries.</li>
+  </ul>
+
+  <h2>Anchoring &amp; reconciliation model (the crux)</h2>
+
+  <h3>Selector schema</h3>
+  <p>Each thread stores an anchor as a set of redundant selectors, captured at comment-creation time, inside the state block:</p>
+  <pre><code>anchor: {
+  quote:    string   // exact selected text (normalized)
+  prefix:   string   // ~30–50 chars/words immediately before the quote
+  suffix:   string   // ~30–50 chars/words immediately after the quote
+  posStart: number   // approximate char offset in canonical text (hint only)
+  posEnd:   number
+}</code></pre>
+  <p><code>prefix</code>/<code>suffix</code> replace the old 1-based <code>occurrence</code> index — context disambiguates duplicates and survives reordering, where an occurrence count breaks the moment earlier identical strings are added or removed.</p>
+  <p>All three text fields (<code>quote</code>, <code>prefix</code>, <code>suffix</code>) are over the adapter's canonical <strong>text</strong> (<code>extractText</code>) — never the raw markup. For HTML that's the rendered text content with tags stripped.</p>
+  <p><strong>How selectors are captured.</strong> On comment creation (and re-anchor) the <em>client</em> captures the full selector set — <code>quote</code> plus surrounding <code>prefix</code>/<code>suffix</code> and approximate <code>posStart/posEnd</code> — from the live selection in the rendered text layer, and sends all of it; the server does not reconstruct selectors from a bare quote. <code>occurrence</code> (in the CLI / agent API) is only a <strong>transient disambiguation input</strong> for choosing which instance of a repeated quote an agent means at capture time — it is resolved to concrete selectors immediately and is <strong>never persisted</strong> in the state block.</p>
+  <p>This is established <strong>prior art, not a bespoke scheme</strong>. The most relatable example is <strong>GitHub PR review comments</strong> — anchored to a line plus surrounding diff context, and marked "Outdated" when the code shifts (exactly <code>orphaned</code> / <code>needs-review</code>). <strong>Google Docs</strong> and <strong>Word</strong> reflow comments the same way, keeping a comment when its target text is deleted. Formally it is the W3C Web Annotation Data Model (<code>TextQuoteSelector</code> = exact + prefix + suffix, plus <code>TextPositionSelector</code> = start/end), with fuzzy matching as shipped by Hypothes.is (diff-match-patch). A proven model, adopted — not invented.</p>
+
+  <h3>Resolution cascade</h3>
+  <p>Resolved fresh against the <strong>current</strong> canonical document text (never against a persisted position):</p>
+  <ol>
+    <li>Exact <code>quote</code> + <code>prefix</code>/<code>suffix</code> near <code>posStart</code> → fast path, common case.</li>
+    <li>On exact miss, <strong>fuzzy match</strong> the quote (approximate string match with a similarity threshold), scoring candidates by surrounding <code>prefix</code>/<code>suffix</code> agreement, biased toward <code>posStart</code>.</li>
+    <li>Best candidate above the confidence threshold wins; otherwise the anchor is orphaned.</li>
+  </ol>
+  <p>A small fuzzy text-matcher (diff-match-patch–style) is vendored into <code>core</code> to keep dependencies light.</p>
+
+  <h3>Canonical-text parity (resolution ↔ highlight)</h3>
+  <p>The server resolves anchors against the adapter's <code>extractText</code> (canonical text); the client paints highlights by re-finding the resolved <code>quote</code> in the <em>rendered DOM's</em> text layer. These must agree, so the <strong>text normalization is a single shared contract</strong> — whitespace collapsed, case-insensitive, <code>script</code>/<code>style</code>/hidden content excluded, block boundaries respected — used by <em>both</em> sides. The seed is today's <code>public/app-helpers.js</code> quote matcher, which already runs in both browser and server; keep that shared. Consequences: character <strong>offsets are server-side hints only</strong>, never shipped to the DOM as positions (the client matches by normalized text, not offset); and a quote the server resolves but the client cannot uniquely locate in the rendered DOM is shown as needs-review, never silently mis-highlighted.</p>
+
+  <h3>Three states (never silently lost, never silently moved)</h3>
+  <ul>
+    <li><strong>Anchored</strong> — confident match; highlight shown normally.</li>
+    <li><strong>Needs review</strong> — fuzzy match below high confidence; shown but flagged, so a low-confidence re-anchor is never silently treated as correct.</li>
+    <li><strong>Orphaned</strong> — no match above threshold; the comment stays in the thread list with its last-known quote/context in an "unanchored" section. Nothing is ever dropped.</li>
+  </ul>
+
+  <h3>Behavior under edits</h3>
+  <table>
+    <thead>
+      <tr><th>External edit</th><th>Outcome</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Edit elsewhere in the doc</td><td>Quote + context still match; resolution follows the shift.</td></tr>
+      <tr><td>Small edit inside the quoted text</td><td>Exact fails; fuzzy + context re-anchors, now covering the edited text.</td></tr>
+      <tr><td>Wholesale rewrite of the region</td><td>Orphaned and surfaced, not lost.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Ownership &amp; timing</h3>
+  <ul>
+    <li><strong>Redline (server) reconciles automatically</strong> on file open, on detected external change, and at render. Because highlights resolve at render time, there is no persisted anchor position that can be stale-and-wrong; the position hint only biases fuzzy search.</li>
+    <li>Reconciliation touches <strong>only the anchor</strong> (where a comment points) — never the comment body or thread, which are owned by their author.</li>
+    <li><strong>Self-healing (lazy):</strong> a successful resolution refreshes the stored <code>prefix</code>/<code>suffix</code>/<code>pos*</code> hints so anchors track the document over many edits — but persisted lazily (on the next state write or on idle), never as a write that races the editing agent. Resolution is recomputed at render regardless, so stale hints only mildly affect fuzzy accuracy, never correctness.</li>
+    <li><strong>Policy (default):</strong> when the quoted text itself changed slightly, let <code>quote</code> follow to the new text while recording that it changed (auditable), rather than freezing the original.</li>
+    <li><strong>Orphan recovery:</strong> human re-selects the new text to re-attach (one gesture); or, when coordinating through a live server, an agent edit op carries the anchor id to re-point atomically (the Model-2 optimization).</li>
+  </ul>
+
+  <h3>Agent re-anchoring tools</h3>
+  <p>Automatic reconciliation handles most edits by itself; the agent intervenes only for what it can't. The surface is <strong>two commands + one report</strong>, all read-only or state-block-only — the agent never writes content through Redline.</p>
+  <p><strong>Reconcile (automatic, lossless, idempotent).</strong> Whenever Redline loads or renders the file it re-resolves every anchor against the current text and classifies each as <code>anchored</code>, <code>needs-review</code>, or <code>orphaned</code>. This is pure resolution — it never deletes or moves a comment, and re-running it yields the same result. Edits elsewhere, and small edits inside the quoted text, re-anchor silently with no agent action.</p>
+  <ol>
+    <li><strong>List anchors (read).</strong> Returns every thread with its current resolution: state, the resolved character range in the canonical text (when matched), and the stored quote/context. The agent reads it <em>before</em> editing to see which comments sit in the region it is about to change, and <em>after</em> editing to see what moved. (Extends today's comments index with the resolved position.)</li>
+    <li><strong>Re-anchor (state-block write).</strong> <code>reanchor &lt;thread-id&gt; --quote "&lt;new text&gt;" [--occurrence N]</code> — points one comment at new text when reconcile couldn't (<code>orphaned</code>) or matched with low confidence (<code>needs-review</code>). For a whole-document rewrite, re-point many at once by submitting them as a batch via <code>apply</code>. Writes only the state block; never touches content.</li>
+  </ol>
+  <p><strong>Reconcile report.</strong> The output of <em>List anchors</em> is the report: the set of <code>orphaned</code> / <code>needs-review</code> threads the agent should fix. It is a queryable view of current state, not a one-shot event — ask any time and get the truth for the file as it is now.</p>
+  <p><strong>The agent loop:</strong> (1) list anchors → note which sit in the region about to change; (2) edit the document text directly in the file; (3) list anchors again → read the <code>orphaned</code> / <code>needs-review</code> leftovers; (4) re-anchor only those (single or bulk).</p>
+  <p>There is no race between automatic reconcile and explicit re-anchor: reconcile is lossless and idempotent, every state-block write is serialized by Redline, and an <code>orphaned</code> classification is not final — re-anchor is simply how the agent supplies the answer reconcile couldn't find. A fuzzy match below the high-confidence threshold is demoted to <code>needs-review</code> rather than silently accepted, so a comment never quietly attaches to the wrong place.</p>
+  <p>The human's recovery path for the same leftovers is the Unanchored UI (see <em>Client</em>). The optional atomic path — handing Redline the new document plus re-anchors in one call — is deferred; the direct-edit-then-reconcile loop above is the floor.</p>
+
+  <h2>Concurrency &amp; ownership model</h2>
+  <ul>
+    <li>The <strong>file is the shared source of truth at rest.</strong> Multiple writers are expected.</li>
+    <li><strong>Content region</strong> — written by the agent directly (any time, server or not) and, later, by the user's text-op edits. <strong>State block</strong> — written only by Redline.</li>
+    <li>Merge rule on any external content change: <strong>take their content, keep my block, re-resolve anchors.</strong> Because the two sides edit disjoint regions, the common case needs no locking.</li>
+    <li>The only genuinely conflicting case — two writers editing the <em>same content region</em> at the same instant — uses <strong>last-write-wins + a visible "document changed, reloaded" notice</strong> to start.</li>
+    <li><strong>Live coordination (optional):</strong> when a server owns the file (registry), agent ops can route through it for instant appearance + atomic anchor updates. Floor behavior without a server is unchanged: direct file write + reconcile-on-reload.</li>
+    <li><strong>Multiple clients are supported by design.</strong> Several clients (the user's browser + the agent, more later) connect to one server; each sends granular ops and receives others' over the event stream. Because comment ops mutate only the state block and the server serializes them, concurrent comment creation is just ordered writes — no clobbering. Designed-for, not hardened in this HTML-first rewrite.</li>
+    <li><strong>Write safety, and accepted clobber.</strong> Redline writes atomically (temp file + rename) and, immediately before writing, re-reads and re-applies only its state block onto the current content — so it never overwrites the agent's edits. It persists on idle / piggybacked on real comment ops, never racing the editor. Filesystem locks are <em>not</em> used: OS file locks are advisory and an external agent won't honor them. If the agent rewrites the file and drops the state block, those comments are lost — <strong>this clobber risk is accepted</strong> as the price of letting an external agent be the primary writer. Redline keeps no on-disk recovery journal; nothing lives outside the one file.</li>
+    <li><strong>Two Redline writers → CAS, not clobber.</strong> Registry routing makes one server the writer in the common case, but a stale/missing registry entry, a second server, or a direct CLI write can still race the state block. Guard every state-block write with an optimistic version/hash check against the current on-disk block: on mismatch, re-read and merge (threads are keyed by id, so independent adds/edits merge cleanly) or return a conflict. This is distinct from the accepted clobber above — that's the agent dropping the block via a content rewrite; this stops two <em>Redline</em> writers from losing each other's comments.</li>
+  </ul>
+
+  <h2>Format adapter contract</h2>
+  <p>Minimal, because Redline never mutates content beyond the state block:</p>
+  <pre><code>interface ReviewFormatAdapter {
+  id: string
+  label: string
+  extensions: string[]
+  canOpen(path): boolean
+
+  extractText(raw): string          // canonical text for anchoring
+  render(raw): RenderedView         // viewable HTML for the iframe (HTML: sanitized passthrough; MD: md→html; code: highlighted)
+  readState(raw): EmbeddedState | null   // parse the embedded block
+  writeState(raw, state): string         // inject/replace/remove ONLY the block; touch nothing else
+}</code></pre>
+  <ul>
+    <li>Highlighting is <strong>client-side decoration</strong> over the rendered DOM: the server sends resolved anchors, the client locates and highlights the text in the rendered view (format-neutral text matching). No offset-mapping in the adapter.</li>
+    <li><strong>This rewrite implements <code>html</code> only.</strong> The adapter interface is the extension seam, but no second format is built here. Unsupported formats return a clear "format not supported yet" error.</li>
+    <li>The seam is designed so later formats drop in as adapters — <strong>Markdown next, possibly DOCX after</strong> — without changing core. To keep that path open, the core must not assume HTML's source ≈ rendered property: it anchors against the adapter's <code>extractText</code> (the <em>rendered</em> text layer), so a format whose source differs from its rendered form (Markdown's <code>**bold**</code> → <code>bold</code>) still works. Beyond that, no format-specific work is in scope now.</li>
+    <li><strong>Rendering is security-sensitive.</strong> Reviewed content is <em>untrusted</em> (AI- or third-party-authored). <code>render()</code> output is shown in a <strong>locked-down sandboxed iframe</strong>: scripts disabled, no inline event handlers, no form submission or navigation, external resource loading restricted, and no same-origin access to Redline's own API. Define the sandbox flags + sanitizer policy explicitly; the current app already sandboxes the iframe — keep at least that posture.</li>
+  </ul>
+
+  <h2>Embedded state block</h2>
+  <p>The on-disk persistence rules (the current code has rich behavior here — read <code>src/state.ts</code> and keep these as golden rules):</p>
+  <ul>
+    <li><strong>Placement.</strong> One block per file. HTML: a <code>&lt;script type="application/json" id="redline-state"&gt;</code> in <code>&lt;head&gt;</code>. Markdown: a trailing HTML comment. Code: a language comment.</li>
+    <li><strong>Escaping.</strong> JSON-escape <code>&lt;</code> (to its unicode escape) so the payload can't break out of the host <code>&lt;script&gt;</code> / comment (current code does this — keep it).</li>
+    <li><strong>Empty state.</strong> When the last thread is deleted, remove the block entirely — don't leave an empty shell.</li>
+    <li><strong>Discovery + agent guidance (required).</strong> Redline stamps a one-line, human/agent-readable marker so an agent that later opens the file can self-orient. This is essential to the core flow: an agent writes a doc → the user opens it in Redline and leaves comments → the user tells the agent to "review" → a <em>fresh</em> agent opens the file and must know it's a Redline doc and what to do. HTML: <code>&lt;meta name="redline-agent-guide" content="Redline review document. Agents: use the redline-review skill; review state is in the #redline-state block."&gt;</code> in <code>&lt;head&gt;</code>; other formats: the same instruction in a leading comment. It points at the <strong>redline-review skill</strong> and the state block. Stamped when Redline first persists to the file (alongside the state block). This marker is the <em>only</em> thing Redline writes besides the state block — so don't claim "only the state block." (Note: the current marker text mentions <code>data-redline-anchor</code> spans — drop that, since spans are gone.)</li>
+    <li><strong>Schema + robustness.</strong> Carry <code>schemaVersion</code>; ignore/reject unknown versions rather than silently corrupting. A malformed/unparseable block → treat as "no review state" and surface a warning; never overwrite a file whose block you couldn't parse without making that explicit.</li>
+  </ul>
+
+  <h2>Client</h2>
+  <ul>
+    <li>App shell (comment rail, active thread, composer, replies/editing, topbar, notices, save/conflict state, server-event refresh) owns review state.</li>
+    <li><strong>Landing / root URL.</strong> <code>/</code> serves the app shell, which branches on <code>GET /api/docs</code>: <strong>no docs open</strong> → an empty state inviting you to open a file (built-in file browser + recent files); <strong>one or more open</strong> → the document switcher, defaulting to the most-recently-active doc (if exactly one is open, show it directly). A specific document is deep-linked as <code>/?doc=&lt;docId&gt;</code>; because <code>docId</code> is ephemeral, a stale link falls back to the switcher / open-by-path rather than erroring.</li>
+    <li>The iframe document viewer stays <strong>imperative behind a small controller</strong> (load rendered content, track selection, apply highlights, scroll alignment). React/UI does not model the reviewed document DOM.</li>
+    <li>No content-edit surface in A (no contenteditable, no <code>beforeinput</code> filtering, no dirty/autosave/whole-doc serialize). These are removed; B reintroduces editing as a content-edit op later.</li>
+    <li>Built with <strong>Preact</strong> (~3KB, React-style components + hooks) — chosen over React for footprint and the single-binary goal, with a near-mechanical upgrade path to React via <code>preact/compat</code> if ever needed. Optional <code>@preact/signals</code> for fine-grained, SSE-driven updates without re-rendering the whole rail. Bundled with <strong>Bun's built-in <code>Bun.build</code></strong> (JSX <code>jsxImportSource</code> → <code>preact</code>); no extra build tooling.</li>
+    <li><strong>Unanchored UI (orphan recovery).</strong> An "Unanchored" section in the rail lists orphaned and needs-review threads with their last-known quote; selecting one lets the user highlight new text in the doc and <strong>Re-attach to selection</strong> (one gesture). A "needs review" (low-confidence fuzzy) thread gets a badge to confirm or re-point. Prior art: Hypothes.is's "Orphaned" tab; Google Docs / Word retaining comments whose anchored text was deleted.</li>
+  </ul>
+
+  <h2>Project layout, build, and binary</h2>
+  <ul>
+    <li><code>src/</code> — all source (<code>core</code>, <code>formats</code>, <code>app</code>, <code>server</code>, <code>agent</code>, <code>client</code>, <code>shared</code>).</li>
+    <li><code>public/</code> — <strong>static assets only</strong>: <code>fonts/</code>, <code>fonts.css</code>, <code>favicon.svg</code>.</li>
+    <li>Build output — a dedicated dir (e.g. <code>dist/</code>), <strong>not</strong> under <code>public/</code>; embeddable into the binary.</li>
+    <li><code>index.html</code> shell is authored under <code>src/client</code> and emitted by the build, not hand-served from <code>public/</code>.</li>
+    <li><strong>Binary:</strong> <code>bun build --compile</code> produces a single executable with the client bundle and fonts embedded as assets (no runtime build step, no <code>public/</code> read at runtime).</li>
+    <li><strong>Nothing generated is committed.</strong> Both <code>dist/</code> and the compiled binary are gitignored. CI builds them; per-platform binaries ship as <strong>GitHub Release assets</strong>, not in the tree. The server runs TypeScript directly (no build); only the client needs bundling, and dev can build-on-the-fly / watch.</li>
+  </ul>
+
+  <h3>File open (portable, server-side)</h3>
+  <p>Path resolution lives <strong>server-side</strong> — the browser sandbox is irrelevant because Redline is a local server with full filesystem access; the client only ever sends/receives a path <em>string</em>. A previous attempt at a native picker wasn't great, so the portable approach is the base and native pickers are optional polish. Keep these behind one <strong><code>FilePicker</code> interface</strong> so we can swap implementations (or return to a system-specific picker) without touching callers:</p>
+  <ul>
+    <li><strong>Primary — launch / CLI arg:</strong> <code>redline ./doc.html</code> opens directly; pair with a recent-files list.</li>
+    <li><strong>Universal fallback — built-in file browser:</strong> the server lists directories/files and serves a small navigator UI; works on every OS/browser, no native deps, even headless/remote. This is the default for a double-clickable binary with no terminal.</li>
+    <li><strong>Optional polish — native dialog per OS:</strong> keep <code>osascript</code> on macOS; Linux/Windows native dialogs are flaky/often-absent, so they're an opt-in implementation of the same <code>FilePicker</code> interface, not the foundation.</li>
+    <li>Approaches that rely on the browser surfacing a real path, or on uploading file bytes, are rejected — the latter breaks "edit the file in place on disk."</li>
+  </ul>
+
+  <h2>Multiple documents</h2>
+  <p>A single server instance holds <strong>many open documents at once</strong> — first-class, not one process per file. This is cheap precisely because review state lives in the files: the server holds only ephemeral per-document machinery, never authoritative data.</p>
+  <ul>
+    <li><strong>Session map.</strong> The server keeps a <code>Map&lt;docId, DocumentSession&gt;</code>; each session owns that document's canonical path, version, file watcher, and SSE subscribers. There is no module-level "current document".</li>
+    <li><strong>Addressing.</strong> Keyed internally by <strong>canonical absolute path</strong> (opening the same file twice returns the same session) and exposed over the API by an <strong>opaque <code>docId</code></strong> from open — for clean, stable route keys (a raw path makes ugly, encoding-sensitive URLs and couples routes to the filesystem). Paths are <em>not</em> secret: they appear in the file browser, the docs list, and <code>info</code> — the opacity is URL/routing hygiene, not path-hiding. The agent CLI keeps taking a file <em>path</em> and resolves it to a session server-side. To get the <code>docId</code> from a path explicitly, an agent uses <code>POST /api/docs</code> {path} (open-or-return-existing → <code>docId</code>), the CLI's <code>redline docid</code> / <code>redline info</code>, or <code>GET /api/docs?path=</code> for an already-open doc.</li>
+    <li><strong><code>docId</code> scheme.</strong> Random and <strong>ephemeral</strong> — <code>doc_</code> + three words drawn (via <code>crypto.getRandomValues</code>) from a curated, profanity-screened wordlist, e.g. <code>doc_brave-otter-canyon</code>. Recognizable in URLs and logs; zero dependency. Collisions are resolved by regenerating against the <code>docId → path</code> index, so correctness never depends on entropy (three words is ample headroom). Ids are <em>not</em> stable across server restarts — by design (see next).</li>
+    <li><strong>Durable identity = the file path.</strong> The <code>docId</code> is an opaque, ephemeral <em>session handle</em>, not an identity. The durable reference is the file path (the file carries its own state and survives restarts for free). Clients and agents must <strong>always resolve path→docId</strong> and never persist a <code>docId</code> expecting it to outlive the session. The ephemerality is deliberate: ids visibly change across restarts, which stops anything from silently depending on their stability and keeps the decision reversible — stability (a hash, or a persisted index) can be added later if shareable deep links ever become a feature, without breaking a promise.</li>
+    <li><strong>Doc-scoped everything.</strong> State, events, assets, comments, and anchors are addressed under <code>/api/docs/:docId/…</code>; each document has its own SSE channel and its own watcher, with an open/close lifecycle.</li>
+    <li><strong>Registry.</strong> A server's registry entry lists all its open documents, so an agent discovers which server hosts a given file. If two live servers claim the same canonical path, the CLI picks deterministically (e.g. most-recently-started) and warns.</li>
+    <li><strong>Switcher updates.</strong> Doc-scoped SSE can't announce a document a client hasn't subscribed to yet, so the document switcher learns about opens/closes from a <strong>server-level signal</strong> — a small server-level event stream or polling <code>GET /api/docs</code>.</li>
+    <li><strong>Lifecycle.</strong> Define watcher behavior for rename/delete (treat as external change, then close), close while clients are connected (notify, then the doc routes 404), and reopening the same canonical path (same session; a fresh <code>docId</code> after a restart). A request with a stale <code>docId</code> returns "unknown doc — re-resolve by path," never a wrong document.</li>
+    <li><strong>Scope.</strong> Server + API are built for real N in this rewrite; the client starts with a minimal document switcher (open / switch / close), with richer multi-document UX (tabs, side-by-side) as later polish.</li>
+  </ul>
+
+  <h2>Data shapes</h2>
+  <p><strong>These are a starting suggestion, not a spec</strong> — shapes derived from the discussion and review that produced this plan, meant to save you from inventing them cold. Treat them as a sensible default and deviate wherever the implementation has a better answer; the wire format is ours to set. The one thing to hold constant: whatever shapes you land on, keep them consistent across server / client / agent (they live in <code>src/shared</code>). Thread/message id format (<code>thread_…</code>, <code>message_…</code>) with validation, and author defaults (agent paths default to "AI", the generic reply path to "User"), follow the current code — preserve them.</p>
+  <pre><code>// ---- core model ----
+interface Message { id: string; author: string; body: string; createdAt: string; updatedAt?: string }
+interface AnchorSelectors {
+  quote: string;     // exact selected text, normalized, over CANONICAL TEXT (not markup)
+  prefix: string;    // context before the quote (see "context window" knob)
+  suffix: string;    // context after
+  posStart: number;  // approx char offset in canonical text — a hint only
+  posEnd: number;
+  originalQuote?: string; // set when self-healing let `quote` follow an edit — keeps the change auditable
+}
+interface Thread {
+  id: string;               // "thread_..."
+  anchor?: AnchorSelectors; // omitted/null = document-level (general) comment, not tied to a quote
+  author: string;
+  createdAt: string;
+  updatedAt: string;
+  messages: Message[];      // [0] = original comment; rest = replies
+}
+
+// ---- embedded state block (the ONLY bytes Redline writes into the file) ----
+interface EmbeddedState { schemaVersion: number; updatedAt: string; threads: Thread[] }
+
+// ---- reconcile report (List anchors) ----
+type AnchorState = "anchored" | "needs-review" | "orphaned";
+interface AnchorStatus {
+  threadId: string;
+  state: AnchorState;
+  range?: { start: number; end: number };  // resolved position when matched
+  confidence?: number;                     // 0..1 for fuzzy matches
+  quote: string;                           // last-known quote, for display
+}
+
+// ---- agent batch (apply / POST .../agent/update) — NO content field ----
+interface AgentUpdate {
+  comments?: { quote: string; body: string; author?: string; occurrence?: number }[];
+  replies?:  { threadId: string; body: string; author?: string }[];
+  edits?:    { threadId: string; messageId: string; body: string }[];
+  deleteThreads?: string[];
+  deleteReplies?: { threadId: string; messageId: string }[];
+  reanchors?: { threadId: string; quote: string; occurrence?: number }[];
+}
+
+// ---- server ----
+interface DocumentSession { docId: string; path: string; format: string; version: string } // + watcher, subscribers
+// POST /api/docs            -> { docId, path, format, version }
+// GET  /api/docs            -> { docs: DocumentSession[] }
+// GET  /api/docs/:id/state  -> { docId, format, version, renderedHtml, threads: Thread[], anchors: AnchorStatus[] }
+</code></pre>
+
+  <h2>Server &amp; agent API</h2>
+  <p>Two clients use this surface: the browser UI and agents (via CLI or HTTP). Principles: we are <strong>free to redesign the wire format</strong> (old files/clients are not preserved); there is <strong>no content-write endpoint</strong> (the agent owns and edits content directly; the API only reads content and writes the comment state block); documents are <strong>addressed by an opaque <code>docId</code></strong> under <code>/api/docs/:docId/</code>, with the server mapping <code>docId</code> ↔ canonical path; and every CLI command <strong>auto-discovers a running server</strong> via the registry (<code>~/.local/state/redline/servers/</code>), routes through it, and resolves the file path to a <code>docId</code> — falling back to operating on the file directly when no server runs. All responses carry <code>format</code> and <code>version</code>. Write endpoints accept an optional <code>expectedVersion</code> (the version the client last saw); a mismatch returns <strong><code>409</code></strong> with the current state so the client can rebase, rather than clobbering. Errors use conventional status codes with a <code>{ error }</code> body (e.g. <code>404</code> for an unknown <code>docId</code> → "re-resolve by path"). CLI is the <code>redline</code> binary; in dev, <code>bun src/agent.ts &lt;command&gt;</code> / <code>bun src/server.ts</code>.</p>
+
+  <h3>CLI — launch &amp; session</h3>
+  <table>
+    <thead><tr><th>Command</th><th>Does</th></tr></thead>
+    <tbody>
+      <tr><td><code>redline &lt;file&gt;</code></td><td>Open a document in the shared server (start one if none is running), or focus it if already open; print the URL.</td></tr>
+      <tr><td><code>redline close &lt;file&gt;</code></td><td>Close a document on its server (frees its watcher + SSE); the server keeps running for its other documents.</td></tr>
+      <tr><td><code>redline servers</code></td><td>List running servers and, for each, its open documents (url, pid, docs).</td></tr>
+    </tbody>
+  </table>
+  <p>All file-path commands below resolve the path to the server's <code>docId</code> automatically.</p>
+
+  <h3>CLI — reading (agent)</h3>
+  <table>
+    <thead><tr><th>Command</th><th>Does</th></tr></thead>
+    <tbody>
+      <tr><td><code>redline comments &lt;file&gt;</code></td><td>Compact thread list: id, anchor quote, resolution state, author, last message.</td></tr>
+      <tr><td><code>redline anchors &lt;file&gt; [--in A:B]</code></td><td>Anchor resolution report — each thread's state (<code>anchored</code> / <code>needs-review</code> / <code>orphaned</code>), resolved character range, and stored quote/context. Optional range filter to a section. This is the reconcile report.</td></tr>
+      <tr><td><code>redline thread &lt;file&gt; &lt;thread-id&gt;</code></td><td>One thread in full, with every message.</td></tr>
+      <tr><td><code>redline info &lt;file&gt;</code></td><td>Document metadata only — <code>docId</code>, path, format, version, updatedAt, summary; no content.</td></tr>
+      <tr><td><code>redline docid &lt;file&gt;</code></td><td>Resolve a file path to its <code>docId</code> and print it (opening the document if needed). Handy when scripting raw HTTP calls against the doc-scoped routes.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>CLI — comment writes</h3>
+  <table>
+    <thead><tr><th>Command</th><th>Does</th></tr></thead>
+    <tbody>
+      <tr><td><code>redline comment &lt;file&gt; "&lt;quote&gt;" "&lt;body&gt;" [--occurrence N] [--author NAME]</code></td><td>Create a new thread anchored to the quoted text (captures quote + prefix/suffix + position selectors).</td></tr>
+      <tr><td><code>redline reply &lt;file&gt; &lt;thread-id&gt; "&lt;body&gt;" [--author NAME]</code></td><td>Add a reply to a thread.</td></tr>
+      <tr><td><code>redline edit-message &lt;file&gt; &lt;thread-id&gt; &lt;message-id&gt; "&lt;body&gt;"</code></td><td>Edit the body of a message.</td></tr>
+      <tr><td><code>redline delete-reply &lt;file&gt; &lt;thread-id&gt; &lt;message-id&gt;</code></td><td>Delete a reply (never the first message — delete the whole thread instead).</td></tr>
+      <tr><td><code>redline delete-thread &lt;file&gt; &lt;thread-id&gt;</code></td><td>Delete a thread: remove it from the state block (what was formerly called "resolve"; no separate kept-resolved state).</td></tr>
+    </tbody>
+  </table>
+
+  <h3>CLI — anchor writes &amp; batch</h3>
+  <table>
+    <thead><tr><th>Command</th><th>Does</th></tr></thead>
+    <tbody>
+      <tr><td><code>redline reanchor &lt;file&gt; &lt;thread-id&gt; --quote "&lt;new text&gt;" [--occurrence N]</code></td><td>Re-point one comment when reconcile orphaned it or matched with low confidence. State block only.</td></tr>
+      <tr><td><code>redline apply &lt;file&gt; &lt;payload.json&gt;</code></td><td>One atomic batch of comment/anchor ops — create comments, replies, delete threads, and re-anchor in bulk (a <code>reanchors</code> array). No content field: Redline never writes content. This is the bulk re-anchor path.</td></tr>
+    </tbody>
+  </table>
+  <p><em>Removed from today's CLI:</em> <code>update-html</code> (content is the agent's to write directly) and <code>repair-anchors</code> (anchoring is reconciled automatically — read via <code>anchors</code>, fixed via <code>reanchor</code>).</p>
+
+  <h3>HTTP — server level</h3>
+  <table>
+    <thead><tr><th>Endpoint</th><th>Does</th></tr></thead>
+    <tbody>
+      <tr><td><code>GET /api/health</code></td><td>Liveness; server info and count of open documents.</td></tr>
+      <tr><td><code>GET /api/docs[?path=&lt;path&gt;]</code></td><td>List open documents (docId, path, format, version). With <code>?path=</code>, return that path's <code>docId</code> if it's open. To resolve-and-open in one step, use <code>POST /api/docs</code>.</td></tr>
+      <tr><td><code>POST /api/docs</code> {path}</td><td>Open a document — or return the existing session for that path; responds with its <code>docId</code>.</td></tr>
+      <tr><td><code>DELETE /api/docs/:docId</code></td><td>Close a document (frees its watcher + SSE).</td></tr>
+      <tr><td><code>GET /api/files?dir=&lt;path&gt;</code></td><td>List a directory's entries — backs the built-in file browser.</td></tr>
+      <tr><td><code>POST /api/open-dialog</code></td><td>Optional native OS file dialog (per-platform polish).</td></tr>
+    </tbody>
+  </table>
+  <p>Everything below is <strong>document-scoped</strong> under <code>/api/docs/:docId/</code>.</p>
+
+  <h3>HTTP — document</h3>
+  <table>
+    <thead><tr><th>Endpoint</th><th>Does</th></tr></thead>
+    <tbody>
+      <tr><td><code>GET /api/docs/:docId/state</code></td><td>Full review state for the UI: rendered view, threads with resolved anchors, format, version.</td></tr>
+      <tr><td><code>GET /api/docs/:docId/events</code></td><td>Per-document SSE stream (see events below).</td></tr>
+      <tr><td><code>GET /api/docs/:docId/assets/*</code></td><td>Serve assets (images, CSS) resolved relative to this document's directory.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>HTTP — comments</h3>
+  <table>
+    <thead><tr><th>Endpoint</th><th>Does</th></tr></thead>
+    <tbody>
+      <tr><td><code>POST /api/docs/:docId/comments</code></td><td>Create a thread (body: quote, message, author, selectors).</td></tr>
+      <tr><td><code>POST /api/docs/:docId/comments/:threadId/replies</code></td><td>Add a reply.</td></tr>
+      <tr><td><code>PUT /api/docs/:docId/comments/:threadId/messages/:messageId</code></td><td>Edit a message body.</td></tr>
+      <tr><td><code>DELETE /api/docs/:docId/comments/:threadId/replies/:messageId</code></td><td>Delete a reply.</td></tr>
+      <tr><td><code>DELETE /api/docs/:docId/comments/:threadId</code></td><td>Delete a thread (removes it from the state block).</td></tr>
+    </tbody>
+  </table>
+
+  <h3>HTTP — anchors</h3>
+  <table>
+    <thead><tr><th>Endpoint</th><th>Does</th></tr></thead>
+    <tbody>
+      <tr><td><code>GET /api/docs/:docId/anchors[?in=A:B]</code></td><td>Anchor resolution report (server twin of <code>redline anchors</code>).</td></tr>
+      <tr><td><code>POST /api/docs/:docId/anchors/:threadId/reanchor</code> {quote, occurrence?}</td><td>Re-point one comment. (Bulk re-point goes through the batch update below.)</td></tr>
+    </tbody>
+  </table>
+
+  <h3>HTTP — agent (compact reads + batch)</h3>
+  <table>
+    <thead><tr><th>Endpoint</th><th>Does</th></tr></thead>
+    <tbody>
+      <tr><td><code>GET /api/docs/:docId/agent/comments/index?since=&lt;ISO&gt;</code></td><td>Compact thread index (no content); optional incremental filter by timestamp.</td></tr>
+      <tr><td><code>GET /api/docs/:docId/agent/comments/:threadId</code></td><td>Full single thread.</td></tr>
+      <tr><td><code>GET /api/docs/:docId/agent/info</code></td><td>Document metadata (no content).</td></tr>
+      <tr><td><code>POST /api/docs/:docId/agent/update</code></td><td>Batch comment/anchor ops — comments, replies, thread deletes, bulk reanchors (server twin of <code>apply</code>).</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Server-sent events (per document: <code>GET /api/docs/:docId/events</code>)</h3>
+  <table>
+    <thead><tr><th>Event</th><th>Fires when</th></tr></thead>
+    <tbody>
+      <tr><td><code>document.opened</code> / <code>document.closed</code></td><td>This document's session started or ended.</td></tr>
+      <tr><td><code>comment.created</code> / <code>comment.replied</code> / <code>comment.edited</code> / <code>comment.deleted</code></td><td>A thread is mutated.</td></tr>
+      <tr><td><code>anchors.reconciled</code></td><td>Anchors were re-resolved (e.g. after an external content change); carries the orphaned / needs-review summary.</td></tr>
+      <tr><td><code>external.changed</code></td><td>The file changed on disk outside Redline.</td></tr>
+    </tbody>
+  </table>
+
+  <p>The <code>redline-review</code> SKILL and <code>AGENTS.md</code> must be updated to the new model: no inline anchor spans to preserve, only the state block; agents edit content freely and let Redline reconcile; and the <strong>file path — not the <code>docId</code> — is the durable identifier</strong> (resolve path→docId each time; never cache a docId across sessions).</p>
+
+  <h2>Deployment surfaces</h2>
+  <p>The local-server design keeps these open. None are built now; none are precluded. Note that review state lives in the file, so the server is nearly stateless today — what varies between targets is the filesystem and the realtime transport, not where comments are stored.</p>
+  <ul>
+    <li><strong>Local binary (primary).</strong> A compiled executable; files on the user's own disk.</li>
+    <li><strong>VPS / container</strong> (Fly, Render, a plain box). Runs as-is — a long-lived Bun HTTP server. Two shifts: the file picker browses <em>server-side</em> files, and a public deployment needs auth / multi-tenancy (out of scope, not precluded).</li>
+    <li><strong>Electron desktop app.</strong> Good fit: run the compiled server as a sidecar (the single-binary work provides it) or port to Node, host the client in a <code>BrowserWindow</code>, and implement the <code>FilePicker</code> via Electron's native <code>dialog.showOpenDialog</code>.</li>
+    <li><strong>Pure serverless (e.g. Vercel functions): awkward, not impossible.</strong> Review state is in the file, so this isn't blocked by in-memory state. What serverless lacks is (a) a persistent local filesystem — Redline edits a file on disk, and serverless disks are ephemeral, so the doc would have to live in durable storage the function reads/writes; and (b) long-lived connections for realtime push (SSE/WebSocket), so you'd fall back to polling. The only genuinely stateful piece is the <em>future</em> in-memory multiplayer model, which isn't built yet. Drop realtime and host the doc on durable storage and today's embedded model could run serverless.</li>
+  </ul>
+
+  <h2>Cutover approach</h2>
+  <ul>
+    <li>Not a big-bang. The existing test suite (<code>state.test.ts</code>, <code>server.test.ts</code>, <code>agent.test.ts</code>, <code>app-helpers.test.ts</code>) is the <strong>behavior spec</strong> — port the still-relevant cases (comment CRUD, thread delete, author fallback, quote matching) onto the new core/adapter, and let the old code keep running until the new path passes them.</li>
+    <li><strong>Drop, don't port</strong> — much of the current suite tests removed behavior and should be deleted, not reimplemented: inline <code>data-redline-anchor</code> span materialization, <code>PUT /api/document</code> + whole-document serialize, <code>update-html</code>, <code>repair-anchors</code>, single-current-document assumptions, and <code>quote + occurrence</code> persistence. Accidentally resurrecting these is the main risk of "port the tests."</li>
+  </ul>
+  <p>Suggested sequence:</p>
+  <ol>
+    <li><code>core</code> (model + selector anchoring + fuzzy resolution + reconciliation) with tests.</li>
+    <li><code>formats/html</code> adapter (extractText / render / read+write block) with golden tests.</li>
+    <li><code>app</code> use-cases over core + adapter.</li>
+    <li><code>server</code> + <code>agent</code> on the new app layer; registry-based routing.</li>
+    <li><code>src/client</code> rebuild out of <code>public/</code>; remove <code>public/app.js</code> and the edit path.</li>
+    <li>Build step + single-binary packaging.</li>
+  </ol>
+  <p>Final gate: typecheck, unit tests, client build, and a browser smoke test pass before deleting the old client.</p>
+
+  <h2>Test plan</h2>
+  <ul>
+    <li><strong>Core / anchoring:</strong> selector capture; exact resolution; fuzzy re-anchor after edit-elsewhere, edit-inside-quote, and duplicate-created; orphan on wholesale rewrite; the three-state classification; self-healing hint refresh; reconciliation touches anchor only, never body.</li>
+    <li><strong>HTML adapter (golden):</strong> read/write the embedded block only; content byte-identical outside the block; render passthrough + sanitization; state block removed when no threads remain.</li>
+    <li><strong>Routes:</strong> every endpoint maps to an app command; response shapes incl. conflict + no-document; additive <code>format</code> field.</li>
+    <li><strong>CLI:</strong> every command works against HTML fixtures and shares the app-command path with the server; registry routing (live server vs direct write).</li>
+    <li><strong>Client:</strong> composer/replies/editing/delete-thread/active-thread/empty-state/save+conflict notices; highlight decoration over rendered DOM; orphaned/needs-review rendering.</li>
+    <li><strong>Browser smoke:</strong> open a doc, select text, comment, reply, edit, delete a thread; externally edit the file (simulate the agent) and confirm anchors re-resolve, low-confidence flags show, and a destroyed region orphans gracefully.</li>
+  </ul>
+
+  <h2>Implementation knobs (decide in code)</h2>
+  <p>Deliberately unspecified — pick sensible defaults during implementation and tune. None block the design.</p>
+  <ul>
+    <li><strong>Fuzzy confidence tiers.</strong> Thresholds for <code>anchored</code> vs <code>needs-review</code> vs <code>orphaned</code>. Start ~ exact or ≥0.9 = anchored, 0.6–0.9 = needs-review, &lt;0.6 = orphaned; tune empirically.</li>
+    <li><strong>Context window length.</strong> How much <code>prefix</code>/<code>suffix</code> to capture — default ~32 chars each side.</li>
+    <li><strong>Fuzzy matcher.</strong> Vendor a small diff-match-patch–style matcher into <code>core</code> (no heavy dependency). Lock its behavior with fixture tests (known edits → expected anchored / needs-review / orphaned) before tuning thresholds, so matching doesn't become folklore.</li>
+    <li><strong>docId wordlist.</strong> A curated, profanity-screened list (e.g. EFF); three words; regenerate on index collision.</li>
+    <li><strong>Embedded <code>schemaVersion</code>.</strong> Bump it for the new selector model so the on-disk format is self-identifying.</li>
+  </ul>
+
+  <h2>Scope discipline</h2>
+  <p><strong>Get the HTML refactor right first.</strong> This rewrite ships a clean core + the single <code>html</code> adapter, the server/CLI/client on top, multiple-documents-per-server, and the binary packaging. <strong>Multiple documents is built</strong> at the server + API layer (the client ships a minimal document switcher to start; richer multi-document UX later). Multi-format support, user content editing (B), multi-client simultaneous editing, and live coordination are <em>designed for</em> (the seams exist) but <strong>not built</strong> here. Resist pulling those forward.</p>
+
+  <h2>Resolved decisions (were open in the first draft)</h2>
+  <ol>
+    <li><strong>Client framework → Preact</strong> (+ optional <code>@preact/signals</code>), upgrade path to React via <code>preact/compat</code>. See <em>Client</em>.</li>
+    <li><strong>Build/commit policy → nothing generated is committed</strong>; CI builds, releases carry per-platform binaries. See <em>Project layout, build, and binary</em>.</li>
+    <li><strong>Portable file-open → server-side <code>FilePicker</code> interface</strong>: CLI arg + built-in file browser as the cross-platform base, native dialogs as optional per-OS polish, kept modular so a system-specific picker can return. See <em>File open</em>.</li>
+    <li><strong>Formats → HTML only this rewrite</strong>; adapter seam designed to admit Markdown next and possibly DOCX later; no Markdown work built now. See <em>Format adapter contract</em>.</li>
+  </ol>
+
+
+</body></html>
