@@ -521,9 +521,10 @@ export async function reuseRunningServer(
       const info = (await opened.json()) as { docId?: string };
       const url = info.docId ? `${record.url}?doc=${info.docId}` : record.url;
       return (
-        `Redline is already running (pid ${record.pid}); opened ${options.documentPath} on it.\n` +
-        `${url}\n` +
-        `(Pass --port N to run a separate server on another port instead.)`
+        `Redline is already running (pid ${record.pid}); opened ${options.documentPath} on the existing server.\n` +
+        `URL: ${url}\n` +
+        `To start a fresh Redline server instead, pass an explicit port, for example:\n` +
+        `  bun run start ${options.documentPath} --port ${options.port + 1}`
       );
     } catch {
       // Unreachable or errored — try the next registered server.
@@ -633,6 +634,7 @@ if (import.meta.main) {
   const reused = await reuseRunningServer(options);
   if (reused) {
     console.log(reused);
+    process.exit(0);
   } else {
     await ensureClientBuilt();
     startServer(options);

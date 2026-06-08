@@ -337,6 +337,9 @@ describe("reuseRunningServer (start reuses a running server)", () => {
     );
     expect(msg).not.toBeNull();
     expect(msg).toContain("already running");
+    expect(msg).toContain("URL: http://server.local/?doc=doc_");
+    expect(msg).toContain("To start a fresh Redline server instead");
+    expect(msg).toContain(`bun run start ${file} --port 7332`);
     expect(msg).toMatch(/\?doc=doc_/);
     // The doc is now open on that server.
     const list = await (await handler(req("GET", "/api/docs"))).json();
