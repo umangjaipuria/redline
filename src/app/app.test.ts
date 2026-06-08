@@ -17,6 +17,7 @@ import {
   NotFoundError,
   AnchorError,
   MalformedDocumentError,
+  releaseLock,
 } from "./index";
 import { agentCommentIndex, agentThread } from "./agent-reads";
 
@@ -184,17 +185,42 @@ describe("merge-on-write (no expectedVersion)", () => {
     expect(view.threads).toHaveLength(2);
   });
 
-  test("a stale lockfile is broken so writes still succeed", () => {
-    // Simulate a crashed writer that left a lock behind, backdated past the
-    // stale window.
-    const lockPath = path.join(dir, `.${path.basename(file)}.redline-lock`);
-    fs.writeFileSync(lockPath, "99999.deadbeef", "utf8");
-    const old = Date.now() / 1000 - 120; // 2 minutes ago
+  const lockPathFor = () => path.join(dir, `.${path.basename(file)}.redline-lock`);
+
+  test("an ancient lockfile is broken so writes still succeed", () => {
+    const lockPath = lockPathFor();
+    fs.writeFileSync(lockPath, `${process.pid}.stillalive`, "utf8"); // alive pid...
+    const old = Date.now() / 1000 - 120; // ...but ancient: broken anyway
     fs.utimesSync(lockPath, old, old);
 
-    const view = createComment(file, { message: "after stale lock", quote: "redesign" });
+    const view = createComment(file, { message: "after ancient lock", quote: "redesign" });
     expect(view.threads).toHaveLength(1);
-    // The stale lock was broken and our own lock released.
+    expect(fs.existsSync(lockPath)).toBe(false);
+  });
+
+  test("a recent lock owned by a DEAD pid is broken", () => {
+    const lockPath = lockPathFor();
+    fs.writeFileSync(lockPath, "2147483640.deadowner", "utf8"); // pid that isn't running
+    // recent mtime (not ancient) — must be broken via pid-liveness, not age
+    const view = createComment(file, { message: "after dead-pid lock", quote: "redesign" });
+    expect(view.threads).toHaveLength(1);
+    expect(fs.existsSync(lockPath)).toBe(false);
+  });
+
+  test("releaseLock never deletes a successor's lock (atomic, token-checked)", () => {
+    const lockPath = lockPathFor();
+    // A successor wrote its own lock after ours was broken.
+    fs.writeFileSync(lockPath, "12345.successor-token", "utf8");
+    releaseLock(lockPath, "our-old-token");
+    // Our release must leave the successor's lock intact.
+    expect(fs.existsSync(lockPath)).toBe(true);
+    expect(fs.readFileSync(lockPath, "utf8")).toBe("12345.successor-token");
+  });
+
+  test("releaseLock removes a lock that still carries our token", () => {
+    const lockPath = lockPathFor();
+    fs.writeFileSync(lockPath, "my-token", "utf8");
+    releaseLock(lockPath, "my-token");
     expect(fs.existsSync(lockPath)).toBe(false);
   });
 

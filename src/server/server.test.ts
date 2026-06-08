@@ -222,6 +222,92 @@ describe("file browser + close", () => {
   });
 });
 
+describe("multiple documents", () => {
+  function secondDoc(): string {
+    const other = path.join(dir, "other.html");
+    fs.writeFileSync(
+      other,
+      `<!doctype html><html><head><title>Other</title></head><body><h1>Roadmap</h1>` +
+        `<p>We will ship offline mode and a mobile app next quarter.</p></body></html>`,
+      "utf8",
+    );
+    return other;
+  }
+
+  test("two distinct files get two distinct docIds, both listed", async () => {
+    const a = await openDoc();
+    const other = secondDoc();
+    const b: DocumentSessionInfo = await (await handler(req("POST", "/api/docs", { path: other }))).json();
+    expect(a.docId).not.toBe(b.docId);
+    const list = await (await handler(req("GET", "/api/docs"))).json();
+    expect(list.docs.map((d: DocumentSessionInfo) => d.docId).sort()).toEqual([a.docId, b.docId].sort());
+  });
+
+  test("comment state is isolated per document", async () => {
+    const a = await openDoc();
+    const b: DocumentSessionInfo = await (await handler(req("POST", "/api/docs", { path: secondDoc() }))).json();
+
+    await handler(req("POST", `/api/docs/${a.docId}/comments`, { message: "on A", quote: "new dashboard" }));
+    await handler(req("POST", `/api/docs/${b.docId}/comments`, { message: "on B", quote: "offline mode" }));
+
+    const stateA: DocumentStateResponse = await (await handler(req("GET", `/api/docs/${a.docId}/state`))).json();
+    const stateB: DocumentStateResponse = await (await handler(req("GET", `/api/docs/${b.docId}/state`))).json();
+    expect(stateA.threads).toHaveLength(1);
+    expect(stateB.threads).toHaveLength(1);
+    expect(stateA.threads[0]!.messages[0]!.body).toBe("on A");
+    expect(stateB.threads[0]!.messages[0]!.body).toBe("on B");
+    expect(stateA.threads[0]!.id).not.toBe(stateB.threads[0]!.id);
+  });
+
+  test("closing one document leaves the others served", async () => {
+    const a = await openDoc();
+    const b: DocumentSessionInfo = await (await handler(req("POST", "/api/docs", { path: secondDoc() }))).json();
+
+    await handler(req("DELETE", `/api/docs/${a.docId}`));
+    expect((await handler(req("GET", `/api/docs/${a.docId}/state`))).status).toBe(404);
+    expect((await handler(req("GET", `/api/docs/${b.docId}/state`))).status).toBe(200);
+
+    const list = await (await handler(req("GET", "/api/docs"))).json();
+    expect(list.docs).toHaveLength(1);
+    expect(list.docs[0].docId).toBe(b.docId);
+  });
+
+  test("opening the same path twice returns the same session", async () => {
+    const a = await openDoc();
+    const again: DocumentSessionInfo = await (await handler(req("POST", "/api/docs", { path: file }))).json();
+    expect(again.docId).toBe(a.docId);
+    expect((await (await handler(req("GET", "/api/docs"))).json()).docs).toHaveLength(1);
+  });
+
+  test("the server-level stream announces opens and closes to the switcher", () => {
+    // Doc-scoped SSE can't announce a doc a client hasn't subscribed to yet, so
+    // the switcher learns about opens/closes from this server-level signal.
+    const events: string[] = [];
+    const controller = {
+      enqueue: (bytes: Uint8Array) => events.push(new TextDecoder().decode(bytes)),
+      close: () => {},
+    } as unknown as ReadableStreamDefaultController<Uint8Array>;
+    manager.subscribeServer(controller);
+
+    const { session } = manager.openOrGet(file);
+    manager.openOrGet(secondDoc());
+    manager.close(session.docId);
+
+    const opened = events.filter((e) => e.includes("document.opened")).length;
+    const closed = events.filter((e) => e.includes("document.closed")).length;
+    expect(opened).toBe(2);
+    expect(closed).toBe(1);
+  });
+
+  test("registryDocs reflects every open document for the registry file", () => {
+    manager.openOrGet(file);
+    manager.openOrGet(secondDoc());
+    const docs = manager.registryDocs();
+    expect(docs).toHaveLength(2);
+    expect(new Set(docs.map((d) => d.path)).size).toBe(2);
+  });
+});
+
 describe("external change detection", () => {
   test("checkExternalChanges reconciles after a direct file edit", async () => {
     const { docId } = await openDoc();

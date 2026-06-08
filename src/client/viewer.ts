@@ -352,13 +352,15 @@ export function injectBase(html: string, base: string): string {
   // sat (before <head>, between </head> and <body>, inside body, after </body>),
   // so no author content is dropped and any stray resource tag still ends up
   // after our CSP in the rebuilt body.
+  // No .trim(): trimming would drop author whitespace that matters inside
+  // <pre>/significant-whitespace content. Strip only Redline-irrelevant wrapper
+  // tags, never author bytes.
   const bodyInner = html
     .replace(/<head\b[^>]*>[\s\S]*?<\/head>/i, "")
     .replace(/<!doctype[^>]*>/i, "")
     .replace(/<\/?html\b[^>]*>/gi, "")
     .replace(/<body\b[^>]*>/i, "")
-    .replace(/<\/body>/i, "")
-    .trim();
+    .replace(/<\/body>/i, "");
 
   const head = `${buildCsp(assetSource)}<base href="${base}">${HIGHLIGHT_STYLE}${headInner}`;
   return `<!doctype html><html><head>${head}</head><body${bodyAttrs}>${bodyInner}</body></html>`;

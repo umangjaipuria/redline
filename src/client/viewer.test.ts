@@ -48,6 +48,14 @@ describe("injectBase reconstruction", () => {
     expect(out).toContain("Content-Security-Policy");
   });
 
+  test("author whitespace (e.g. <pre>) is preserved, not trimmed", () => {
+    const out = injectBase(
+      `<html><head></head><body><pre>  line1\n  line2\n</pre></body></html>`,
+      BASE,
+    );
+    expect(out).toContain("<pre>  line1\n  line2\n</pre>");
+  });
+
   test("CSP restricts resources to the doc-scoped asset path, not broad 'self'", () => {
     const out = injectBase(`<html><head></head><body></body></html>`, BASE);
     expect(out).toContain(`img-src ${BASE}`);
