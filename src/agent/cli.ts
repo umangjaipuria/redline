@@ -321,17 +321,13 @@ function documentInfo(file: string): unknown {
 async function openDoc(file: string, deps: CliDeps): Promise<string> {
   const canonical = path.resolve(file);
   if (!fs.existsSync(canonical)) throw new Error(`Not a file: ${canonical}`);
-  const record = await ensureServerWithDoc(canonical, deps);
-  const docId = record.docs.find((entry) => entry.path === canonical)?.docId;
-  const url = docId ? `${record.url}?doc=${docId}` : record.url;
-  return `Redline is serving ${canonical}\n${url}`;
+  const { url, docId } = await ensureServerWithDoc(canonical, deps);
+  return `Redline is serving ${canonical}\n${url}?doc=${docId}`;
 }
 
 async function resolveDocId(file: string, deps: CliDeps): Promise<string> {
   const canonical = path.resolve(file);
-  const record = await ensureServerWithDoc(canonical, deps);
-  const docId = record.docs.find((entry) => entry.path === canonical)?.docId;
-  if (!docId) throw new Error("Could not resolve a docId for that file.");
+  const { docId } = await ensureServerWithDoc(canonical, deps);
   return docId;
 }
 
@@ -356,23 +352,31 @@ function listServers(deps: CliDeps): string {
   );
 }
 
-// Ensure SOME server has this file open, returning that server's record. Opens
-// on an existing server if one is running, else starts a fresh server.
-async function ensureServerWithDoc(canonical: string, deps: CliDeps): Promise<ServerRecord> {
-  const hosting = findServerForPath(canonical, deps.serversDir);
+// Ensure SOME server has this file open, returning its url + the doc's id. Opens
+// on an existing server if one is running, else starts a fresh server. The docId
+// comes from the POST /api/docs RESPONSE, not the registry file, so it is correct
+// even before the registry has flushed.
+async function ensureServerWithDoc(
+  canonical: string,
+  deps: CliDeps,
+): Promise<{ url: string; docId: string }> {
+  const hosting = serverTargetFor(canonical, deps);
   if (hosting) return hosting;
 
   const running = readServerRecords(deps.serversDir);
   if (running.length > 0) {
     const server = running[0]!;
-    await postJson(deps, `${server.url}api/docs`, { path: canonical });
-    const refreshed = findServerForPath(canonical, deps.serversDir);
-    if (refreshed) return refreshed;
-    // Registry not yet flushed; report the open anyway.
-    return { ...server, docs: [...server.docs] };
+    const info = (await postJson(deps, `${server.url}api/docs`, { path: canonical })) as {
+      docId?: string;
+    };
+    if (!info.docId) throw new Error("Server did not return a docId for the opened document.");
+    return { url: server.url, docId: info.docId };
   }
 
-  return deps.startServer(canonical, deps);
+  const record = await deps.startServer(canonical, deps);
+  const docId = record.docs.find((entry) => entry.path === canonical)?.docId;
+  if (!docId) throw new Error("Started a server but it did not report the document's docId.");
+  return { url: record.url, docId };
 }
 
 // --- HTTP helpers --------------------------------------------------------

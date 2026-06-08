@@ -122,6 +122,27 @@ export interface MutationResult {
 // current view.
 const MAX_WRITE_ATTEMPTS = 5;
 
+// The single state-block write path — optimistic concurrency, exactly as the
+// plan specifies ("Guard every state-block write with an optimistic
+// version/hash check against the current on-disk block: on mismatch, re-read and
+// merge — threads are keyed by id, so independent adds/edits merge cleanly — or
+// return a conflict"). NO cooperative lockfile: a file-based lock can't be made
+// TOCTOU-free without OS advisory locks, which the plan rejects (an external
+// agent won't honor them), and a buggy lock is worse than none. Instead:
+//
+//   - Within one process, writes are serialized already (this function is fully
+//     synchronous — no await between read and rename).
+//   - Across writers, each attempt reads the CURRENT bytes, runs the mutation
+//     against the threads on disk now (so independent comment adds/edits/deletes
+//     merge by id), re-applies ONLY our state block onto those bytes (so an
+//     external CONTENT edit by the agent is preserved), and re-reads immediately
+//     before the atomic rename — retrying if the file moved, so we merge instead
+//     of clobber.
+//   - The irreducible micro-window between that final compare and the rename
+//     degrades to last-write-wins, which the plan accepts as the starting
+//     behavior for two genuinely-simultaneous writers (paired with the client's
+//     "document changed, reloaded" notice). It never loses data silently outside
+//     that window, and never corrupts coordination state.
 export function mutateState(
   absolutePath: string,
   expectedVersion: string | undefined,
@@ -129,32 +150,6 @@ export function mutateState(
 ): DocumentView {
   const adapter = requireAdapterForPath(absolutePath);
 
-  // Two layers of protection:
-  //  1. A cooperative lockfile serializes REDLINE writers to this file across
-  //     processes (a second server, a stale registry, a direct CLI write). The
-  //     plan's "every state-block write is serialized by Redline" — Redline
-  //     instances honor it because they are the same code. This is NOT relying
-  //     on the external agent to honor a lock (it doesn't); see layer 2.
-  //  2. Inside the lock, an optimistic re-read-before-rename merges any external
-  //     CONTENT edit the agent made (the agent writes content without the lock):
-  //     we re-apply only our state block onto the freshest bytes, and retry if
-  //     the file moved between our read and the rename.
-  // buildView (re-read + render + reconcile) runs OUTSIDE the lock to keep the
-  // hold time to the bare write cycle.
-  const finalContent = withWriteLock(absolutePath, () =>
-    mutateLocked(absolutePath, adapter, expectedVersion, mutate),
-  );
-  return buildView(absolutePath, finalContent);
-}
-
-// Runs under the write lock. Returns the final on-disk content (the caller
-// builds the view outside the lock).
-function mutateLocked(
-  absolutePath: string,
-  adapter: ReturnType<typeof requireAdapterForPath>,
-  expectedVersion: string | undefined,
-  mutate: (ctx: MutationContext) => MutationResult,
-): string {
   for (let attempt = 0; attempt < MAX_WRITE_ATTEMPTS; attempt += 1) {
     const content = readFile(absolutePath);
     const currentVersion = versionFor(content);
@@ -177,17 +172,17 @@ function mutateLocked(
     };
     const nextContent = adapter.writeState(content, nextState);
     if (nextContent === content) {
-      return content; // no-op write (e.g. idle self-heal)
+      return buildView(absolutePath, content); // no-op write (e.g. idle self-heal)
     }
 
-    // CAS guard: if the bytes changed since we read them, another writer (a
-    // second Redline or a direct content edit) slipped in — retry against the
+    // Optimistic guard: if the bytes changed since we read them, another writer
+    // (a second Redline or a direct content edit) slipped in — retry against the
     // fresh bytes so we merge instead of clobber.
     if (readFile(absolutePath) !== content) {
       continue;
     }
     writeFileAtomic(absolutePath, nextContent);
-    return nextContent;
+    return buildView(absolutePath, nextContent);
   }
 
   throw new ConflictError(
@@ -235,133 +230,6 @@ function writeFileAtomic(filePath: string, content: string): void {
   fs.renameSync(tempPath, filePath);
 }
 
-const LOCK_TIMEOUT_MS = 10_000;
-// A lock this old is treated as abandoned even if its owner pid looks alive
-// (guards against pid reuse deadlocking writes). Far longer than any real hold —
-// a Redline state-block write is sub-millisecond — so it never steals from a
-// legitimately-active writer.
-const LOCK_ANCIENT_MS = 30_000;
-
-// Cooperative advisory lock between Redline writers, via an O_EXCL lockfile next
-// to the document, held only for the short synchronous read/mutate/write cycle.
-// Correctness rules:
-//   - Each acquisition writes "<pid>.<random>" so ownership is identifiable.
-//   - A lock is broken ONLY when its owner process is dead (pid-liveness) or the
-//     lock is ancient — never when the owner is alive, so a slow-but-live writer
-//     is never stolen from. On timeout we surface a ConflictError, not a steal.
-//   - Breaking and releasing are atomic via rename (only one racer wins), so two
-//     waiters can't both "break" a lock, and a releasing owner can never delete a
-//     successor's lock.
-// The lockfile is a hidden sibling so it never shows in the file browser.
-function withWriteLock<T>(targetPath: string, fn: () => T): T {
-  const dir = path.dirname(targetPath);
-  const lockPath = path.join(dir, `.${path.basename(targetPath)}.redline-lock`);
-  fs.mkdirSync(dir, { recursive: true });
-  const token = `${process.pid}.${randomSuffix()}`;
-
-  const deadline = Date.now() + LOCK_TIMEOUT_MS;
-  let acquired = false;
-  while (!acquired) {
-    try {
-      const fd = fs.openSync(lockPath, "wx");
-      fs.writeSync(fd, token);
-      fs.closeSync(fd);
-      acquired = true;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      if (Date.now() > deadline) {
-        // The holder is alive and recent — surface a conflict rather than break
-        // a live lock (which would create double ownership and lose a write).
-        throw new ConflictError(
-          "Another Redline writer holds the document lock. Retry.",
-          buildView(targetPath, readFile(targetPath)),
-        );
-      }
-      if (tryBreakStaleLock(lockPath)) continue; // broke an abandoned lock; retry now
-      sleepSync(10);
-    }
-  }
-
-  try {
-    return fn();
-  } finally {
-    releaseLock(lockPath, token);
-  }
-}
-
-// Break a lock only when its owner process is dead, or it is ancient. The break
-// is atomic (rename away, then delete), so concurrent waiters can't both break
-// one lock into double ownership. Returns true if a break was attempted and the
-// caller should retry the create; false to keep waiting (owner alive & recent,
-// or a persistent filesystem error).
-function tryBreakStaleLock(lockPath: string): boolean {
-  let content: string;
-  let mtimeMs: number;
-  try {
-    content = fs.readFileSync(lockPath, "utf8");
-    mtimeMs = fs.statSync(lockPath).mtimeMs;
-  } catch {
-    return true; // vanished between open and read; just retry the create
-  }
-  const ownerPid = Number.parseInt(content.split(".")[0] ?? "", 10);
-  const ownerDead = Number.isInteger(ownerPid) && !isProcessAlive(ownerPid);
-  const ancient = Date.now() - mtimeMs > LOCK_ANCIENT_MS;
-  if (!ownerDead && !ancient) return false; // live & recent owner — do not break
-
-  const stealPath = `${lockPath}.${process.pid}.${randomSuffix()}.steal`;
-  try {
-    fs.renameSync(lockPath, stealPath); // atomic: only one waiter wins this
-    fs.rmSync(stealPath, { force: true });
-    return true;
-  } catch (error) {
-    // ENOENT: another waiter already broke it — retry. Anything else (e.g.
-    // EPERM): can't break; wait so the deadline path can fire.
-    return (error as NodeJS.ErrnoException).code === "ENOENT";
-  }
-}
-
-// Release atomically so we can never delete a SUCCESSOR's lock (one that
-// replaced ours after we were broken as ancient). Rename our lock away first; if
-// the renamed file still carries our token it was ours (delete it), otherwise a
-// successor exists and we restore it untouched.
-export function releaseLock(lockPath: string, token: string): void {
-  const releasePath = `${lockPath}.${process.pid}.${randomSuffix()}.release`;
-  try {
-    fs.renameSync(lockPath, releasePath);
-  } catch {
-    return; // already gone / broken by someone else — nothing to release
-  }
-  try {
-    if (fs.readFileSync(releasePath, "utf8") === token) {
-      fs.rmSync(releasePath, { force: true });
-    } else {
-      // A successor's lock — put it back. If a newer lock already exists, drop
-      // our copy rather than clobber it.
-      try {
-        fs.renameSync(releasePath, lockPath);
-      } catch {
-        fs.rmSync(releasePath, { force: true });
-      }
-    }
-  } catch {
-    fs.rmSync(releasePath, { force: true });
-  }
-}
-
-function isProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0); // signal 0 = existence check, no signal delivered
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException)?.code === "EPERM"; // exists, other user
-  }
-}
-
-// Block the current thread briefly (lock contention is rare and the critical
-// section is microseconds, so this never meaningfully stalls the event loop).
-function sleepSync(ms: number): void {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
 
 function randomSuffix(): string {
   return crypto.randomBytes(6).toString("hex");
