@@ -82,6 +82,11 @@ export function App() {
     railManualScrollRef.current = false;
   }, []);
 
+  useEffect(() => {
+    const documentName = mode === "document" && state?.path ? basename(state.path) : null;
+    document.title = documentName ? `${documentName} - redline` : "redline";
+  }, [mode, state?.path]);
+
   const animateRailScrollTo = useCallback((rail: HTMLElement, targetTop: number, generation: number) => {
     if (railRevealAnimationRef.current !== null) {
       cancelAnimationFrame(railRevealAnimationRef.current);

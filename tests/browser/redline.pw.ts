@@ -363,6 +363,7 @@ async function railCardTopIsVisible(page: Page, threadId: string): Promise<boole
 
 async function openDocument(page: Page, app: RedlineInstance): Promise<Frame> {
   await page.goto(`${app.origin}/?doc=${app.docId}`);
+  await expect(page).toHaveTitle("doc.html - redline");
   await expect(page.locator("iframe.document-frame")).toBeVisible();
   await expect(page.locator(".document-name")).toHaveText("doc.html");
   const frame = await documentFrame(page);
