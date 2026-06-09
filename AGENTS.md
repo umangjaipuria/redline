@@ -38,6 +38,13 @@ The only bytes Redline writes are the state block and that marker; passive watch
 
 The CLI is `redline`. In this repo, run it during development with `bun src/agent/cli.ts <command>`. Every file-path command auto-discovers a running server (via `~/.local/state/redline/servers/<pid>.json`, which lists each server's open `docs`) and routes through it when the document is open there; otherwise it operates on the file directly. You always pass the **file path** — never a docId. The docId is an ephemeral session handle; resolve path → docId each time and never cache it across sessions.
 
+Session:
+
+```bash
+bun src/agent/cli.ts servers                # list running servers and their open docs
+bun src/agent/cli.ts close <file>           # close a document on its server
+```
+
 ## Read Feedback
 
 ```bash

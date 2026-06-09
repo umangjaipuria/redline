@@ -41,6 +41,15 @@ You do **not** maintain anchors by hand. Edit the content directly; Redline re-r
 
 Passive reconcile is read-only. A running server may refresh the open browser and the `anchors` report while you edit, but it does not rewrite the HTML just because anchors can be healed. Healed selector hints are cache-like and are persisted only when Redline is already making an intentional state-block write, when the document closes / server shuts down, or after the file has stayed quiet long enough for an idle flush.
 
+## Session
+
+List running servers and their open docs, or close a document on its server (rarely needed — the file path is the durable identity; closing only drops the live session):
+
+```bash
+redline servers
+redline close <file>
+```
+
 ## Read Feedback
 
 Compact thread list (id, anchor quote, resolution state, author, last message):
