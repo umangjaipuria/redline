@@ -39,6 +39,8 @@ Redline resolves anchors **fresh** against the current text on every load/render
 
 You do **not** maintain anchors by hand. Edit the content directly; Redline re-resolves automatically. You only intervene for what it can't resolve (orphaned / needs-review), using `reanchor`.
 
+Passive reconcile is read-only. A running server may refresh the open browser and the `anchors` report while you edit, but it does not rewrite the HTML just because anchors can be healed. Healed selector hints are cache-like and are persisted only when Redline is already making an intentional state-block write, when the document closes / server shuts down, or after the file has stayed quiet long enough for an idle flush.
+
 ## Read Feedback
 
 Compact thread list (id, anchor quote, resolution state, author, last message):
@@ -72,7 +74,7 @@ redline info <file>
 3. `redline anchors <file>` again — read the orphaned / needs-review leftovers. Most edits re-anchor silently; only the leftovers need action.
 4. `redline reanchor <file> <thread-id> --quote "<new text>"` — re-point only those. For many at once, batch them via `apply`.
 
-There is no race between automatic reconcile and explicit re-anchor: reconcile is lossless and idempotent, and every state-block write is serialized by Redline.
+There is no passive reconcile write racing your content edits: reconcile is lossless, derived from the current file text, and safe to re-run. Explicit comment/reply/delete/re-anchor operations still write the state block and are serialized by Redline.
 
 ## Comment Writes
 

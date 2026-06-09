@@ -116,47 +116,48 @@
 114. Threads without a usable anchor should be reported as orphaned.
 115. Reconciliation should not change message bodies.
 116. Reconciliation should be idempotent when the document text has not changed.
-117. Reconciliation should be allowed to refresh anchor hints without changing the user-visible comment content.
-118. A duplicate phrase introduced later should not steal an existing anchor from its original context.
-119. Ambiguous highlights should not be painted on the wrong occurrence.
-120. Highlight rendering should follow the current resolved anchor state on every load.
-121. Highlight rendering should not require saved inline markup in the document body.
-122. The active anchor highlight should be visually distinct.
-123. The reviewed document should preserve author whitespace that affects visible content.
-124. The reviewed document should preserve author content while blocking reviewed-file executable behavior.
-125. The reviewed document should not run executable behavior from the reviewed file.
-126. The reviewed document should not allow reviewed-file forms to submit.
-127. Reviewed-file assets should load only through the document's allowed local asset path.
-128. Malformed embedded review state should not prevent the document from being viewed.
-129. Malformed embedded review state should show a warning.
-130. Malformed embedded review state should not be overwritten by a new write.
-131. Unsupported review state should be ignored rather than migrated silently.
-132. Saving review state should replace existing review state rather than duplicate it.
-133. Empty review state should remove the stored review state.
-134. Stored review state should escape dangerous text so it cannot break out of storage.
-135. Comment writes should be guarded against stale document versions.
-136. A stale write should fail with the current document state available for reload.
-137. Independent comment additions should merge rather than drop each other.
-138. A comment write after an external document edit should preserve the external edit.
-139. Reconciliation after an external document edit should keep existing threads.
-140. Live clients should refresh when comments are created, replied to, edited, deleted, or re-anchored.
-141. Live clients should refresh when the document changes on disk.
-142. Live clients should tell the user when the document changed outside the review UI.
-143. Live clients should tell the user when embedded review state could not be read.
-144. Agent-created comments should use the agent author when one is supplied.
-145. Agent-created comments should default to an agent author when no author is supplied.
-146. Browser-created comments should default to a user author when no author is supplied.
-147. Agent batch updates should apply as one atomic review-state update.
-148. Agent batch updates may create comments, add replies, edit messages, delete replies, delete threads, and re-anchor threads.
-149. Agent batch updates should not include or modify document content.
-150. Agent reads should be able to list compact thread summaries without returning document content.
-151. Agent reads should be able to fetch one full thread by id.
-152. Agent reads for a missing thread should fail clearly.
-153. Agent thread summaries should report each thread's current anchor state.
-154. Agent thread summaries should support filtering by recent message time.
-155. Comment operations for an unknown live document should fail with guidance to re-resolve the document.
-156. Opening a file that is already open in a running review server should reuse that server.
-157. The open-documents list should update when documents are opened or closed.
-158. The document chooser should not auto-open a document unless a specific document is requested.
-159. Cross-origin browser requests to the local review service should be rejected.
-160. Unsupported file types should be rejected for review.
+117. Passive reconciliation should not write refreshed anchor hints back to the file.
+118. Intentional state writes may persist refreshed anchor hints without changing the user-visible comment content.
+119. A duplicate phrase introduced later should not steal an existing anchor from its original context.
+120. Ambiguous highlights should not be painted on the wrong occurrence.
+121. Highlight rendering should follow the current resolved anchor state on every load.
+122. Highlight rendering should not require saved inline markup in the document body.
+123. The active anchor highlight should be visually distinct.
+124. The reviewed document should preserve author whitespace that affects visible content.
+125. The reviewed document should preserve author content while blocking reviewed-file executable behavior.
+126. The reviewed document should not run executable behavior from the reviewed file.
+127. The reviewed document should not allow reviewed-file forms to submit.
+128. Reviewed-file assets should load only through the document's allowed local asset path.
+129. Malformed embedded review state should not prevent the document from being viewed.
+130. Malformed embedded review state should show a warning.
+131. Malformed embedded review state should not be overwritten by a new write.
+132. Unsupported review state should be ignored rather than migrated silently.
+133. Saving review state should replace existing review state rather than duplicate it.
+134. Empty review state should remove the stored review state.
+135. Stored review state should escape dangerous text so it cannot break out of storage.
+136. Comment writes should be guarded against stale document versions.
+137. A stale write should fail with the current document state available for reload.
+138. Independent comment additions should merge rather than drop each other.
+139. A comment write after an external document edit should preserve the external edit.
+140. Reconciliation after an external document edit should keep existing threads.
+141. Live clients should refresh when comments are created, replied to, edited, deleted, or re-anchored.
+142. Live clients should refresh when the document changes on disk.
+143. Live clients should tell the user when the document changed outside the review UI.
+144. Live clients should tell the user when embedded review state could not be read.
+145. Agent-created comments should use the agent author when one is supplied.
+146. Agent-created comments should default to an agent author when no author is supplied.
+147. Browser-created comments should default to a user author when no author is supplied.
+148. Agent batch updates should apply as one atomic review-state update.
+149. Agent batch updates may create comments, add replies, edit messages, delete replies, delete threads, and re-anchor threads.
+150. Agent batch updates should not include or modify document content.
+151. Agent reads should be able to list compact thread summaries without returning document content.
+152. Agent reads should be able to fetch one full thread by id.
+153. Agent reads for a missing thread should fail clearly.
+154. Agent thread summaries should report each thread's current anchor state.
+155. Agent thread summaries should support filtering by recent message time.
+156. Comment operations for an unknown live document should fail with guidance to re-resolve the document.
+157. Opening a file that is already open in a running review server should reuse that server.
+158. The open-documents list should update when documents are opened or closed.
+159. The document chooser should not auto-open a document unless a specific document is requested.
+160. Cross-origin browser requests to the local review service should be rejected.
+161. Unsupported file types should be rejected for review.

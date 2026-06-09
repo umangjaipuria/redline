@@ -599,6 +599,7 @@ export function startServer(options: ServerOptions): void {
   syncRegistry();
   registerCleanup(() => {
     manager.stopWatching();
+    manager.closeAll();
     removeServerRecord(SERVERS_DIR, process.pid);
   });
   manager.startWatching();

@@ -205,6 +205,20 @@ describe("anchors + agent endpoints", () => {
     const state: DocumentStateResponse = await res.json();
     expect(state.anchors[0]!.state).toBe("anchored");
   });
+
+  test("intentional state writes piggyback healed selector hints", async () => {
+    const { docId } = await openDoc();
+    await handler(req("POST", `/api/docs/${docId}/comments`, { message: "x", quote: "metrics are accurate" }));
+    fs.writeFileSync(
+      file,
+      fs.readFileSync(file, "utf8").replace("The metrics are accurate", "The metrics are very accurate"),
+      "utf8",
+    );
+
+    await handler(req("POST", `/api/docs/${docId}/comments`, { message: "second", quote: "redesign" }));
+
+    expect(fs.readFileSync(file, "utf8")).toContain('"quote":"metrics are very accurate"');
+  });
 });
 
 describe("file browser + close", () => {
@@ -380,6 +394,83 @@ describe("external change detection", () => {
     // The doc still renders the edited content and the comment survives.
     expect(state.renderedHtml).toContain("more analytics charts");
     expect(state.threads).toHaveLength(1);
+  });
+
+  test("passive external-change reconcile does not rewrite healed hints", async () => {
+    const { docId } = await openDoc();
+    await handler(req("POST", `/api/docs/${docId}/comments`, { message: "x", quote: "metrics are accurate" }));
+    const edited = fs.readFileSync(file, "utf8").replace("The team shipped", "The full team shipped");
+    fs.writeFileSync(file, edited, "utf8");
+
+    manager.checkExternalChanges();
+
+    expect(fs.readFileSync(file, "utf8")).toBe(edited);
+    expect(manager.get(docId)!.pendingHealedHints).toBeDefined();
+    const state: DocumentStateResponse = await (await handler(req("GET", `/api/docs/${docId}/state`))).json();
+    expect(state.anchors[0]!.state).toBe("anchored");
+  });
+
+  test("close flushes pending healed hints", async () => {
+    const { docId } = await openDoc();
+    await handler(req("POST", `/api/docs/${docId}/comments`, { message: "x", quote: "metrics are accurate" }));
+    const edited = fs.readFileSync(file, "utf8").replace("The metrics are accurate", "The metrics are very accurate");
+    fs.writeFileSync(file, edited, "utf8");
+    manager.checkExternalChanges();
+    expect(fs.readFileSync(file, "utf8")).toBe(edited);
+
+    await handler(req("DELETE", `/api/docs/${docId}`));
+
+    expect(fs.readFileSync(file, "utf8")).toContain('"quote":"metrics are very accurate"');
+  });
+
+  test("quiet idle flush persists pending healed hints after the file stops changing", async () => {
+    manager = new SessionManager(undefined, { healedHintFlushQuietMs: 0 });
+    handler = createRequestHandler({
+      manager,
+      serverInfo: () => ({ url: "http://x", pid: 1, startedAt: "now", docs: [] }),
+    });
+    const { docId } = await openDoc();
+    await handler(req("POST", `/api/docs/${docId}/comments`, { message: "x", quote: "metrics are accurate" }));
+    const edited = fs.readFileSync(file, "utf8").replace("The metrics are accurate", "The metrics are very accurate");
+    fs.writeFileSync(file, edited, "utf8");
+
+    manager.checkExternalChanges();
+    expect(fs.readFileSync(file, "utf8")).toBe(edited);
+    manager.checkExternalChanges();
+
+    expect(fs.readFileSync(file, "utf8")).toContain('"quote":"metrics are very accurate"');
+  });
+
+  test("quiet flush does not swallow a newer external edit", async () => {
+    manager = new SessionManager(undefined, { healedHintFlushQuietMs: 0 });
+    handler = createRequestHandler({
+      manager,
+      serverInfo: () => ({ url: "http://x", pid: 1, startedAt: "now", docs: [] }),
+    });
+    const { docId } = await openDoc();
+    const events: string[] = [];
+    const controller = {
+      enqueue: (bytes: Uint8Array) => events.push(new TextDecoder().decode(bytes)),
+      close: () => {},
+    } as unknown as ReadableStreamDefaultController<Uint8Array>;
+    manager.subscribeDoc(manager.get(docId)!, controller);
+
+    await handler(req("POST", `/api/docs/${docId}/comments`, { message: "x", quote: "metrics are accurate" }));
+    events.length = 0;
+    const firstEdit = fs.readFileSync(file, "utf8").replace("The team shipped", "The full team shipped");
+    fs.writeFileSync(file, firstEdit, "utf8");
+    manager.checkExternalChanges();
+    expect(manager.get(docId)!.pendingHealedHints).toBeDefined();
+    events.length = 0;
+
+    const secondEdit = fs.readFileSync(file, "utf8").replace("asked for more charts", "asked for more analytics charts");
+    fs.writeFileSync(file, secondEdit, "utf8");
+    manager.checkExternalChanges();
+
+    expect(fs.readFileSync(file, "utf8")).toBe(secondEdit);
+    expect(events.some((event) => event.includes("external.changed"))).toBe(true);
+    const state: DocumentStateResponse = await (await handler(req("GET", `/api/docs/${docId}/state`))).json();
+    expect(state.renderedHtml).toContain("more analytics charts");
   });
 
   test("an idle tick on an unchanged file is a no-op (cheap stat path)", async () => {

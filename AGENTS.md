@@ -24,7 +24,7 @@ There are **no inline anchor spans**. Highlights are rendered at view time, not 
 }
 ```
 
-Redline resolves anchors fresh on every load/render (exact → fuzzy + context cascade) and classifies each as **anchored**, **needs-review**, or **orphaned**. You never maintain anchors by hand — edit content freely and Redline reconciles.
+Redline resolves anchors fresh on every load/render (exact → fuzzy + context cascade) and classifies each as **anchored**, **needs-review**, or **orphaned**. Passive reconcile is read-only: when the live server notices a file edit, it refreshes the browser and anchor report without rewriting the HTML. Refreshed selector hints are persisted only with an intentional Redline state write, on document close / server shutdown, or after the file has stayed quiet long enough for an idle flush. You never maintain anchors by hand — edit content freely and Redline reconciles.
 
 Redline also stamps opened documents with a discovery marker so an agent can self-orient from the file alone:
 
@@ -32,7 +32,7 @@ Redline also stamps opened documents with a discovery marker so an agent can sel
 <meta name="redline-agent-guide" content="Redline review document. Agents: use the redline-review skill; review state is in the #redline-state block.">
 ```
 
-The only bytes Redline writes are the state block and that marker.
+The only bytes Redline writes are the state block and that marker; passive watching/reconcile does not write either one.
 
 ## The CLI
 

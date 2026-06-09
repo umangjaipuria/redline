@@ -9,6 +9,7 @@ import {
   deleteReply,
   deleteThread,
   editMessage,
+  flushReconciledHints,
   listAnchors,
   reanchor,
   readDocument,
@@ -153,16 +154,23 @@ describe("reconcile + reanchor after external edits", () => {
     expect(reanchored.anchors[0]!.state).toBe("anchored");
   });
 
-  test("reconcileDocument heals hints without bumping updatedAt", () => {
+  test("reconcileDocument reports healed hints without writing", () => {
     const view = createComment(file, { message: "x", quote: "metrics are accurate" });
     const before = view.updatedAt;
     const edited = fs
       .readFileSync(file, "utf8")
       .replace("The metrics are accurate", "The metrics are very accurate");
     fs.writeFileSync(file, edited, "utf8");
+    const bytesBeforeReconcile = fs.readFileSync(file, "utf8");
     const { view: healedView, healed } = reconcileDocument(file);
     expect(healed).toBe(true);
     expect(healedView.updatedAt).toBe(before);
+    expect(fs.readFileSync(file, "utf8")).toBe(bytesBeforeReconcile);
+
+    const flushed = flushReconciledHints(file, healedView.version);
+    expect(flushed.healed).toBe(true);
+    expect(flushed.view.updatedAt).toBe(before);
+    expect(fs.readFileSync(file, "utf8")).not.toBe(bytesBeforeReconcile);
   });
 });
 
@@ -180,7 +188,7 @@ describe("merge-on-write (no expectedVersion)", () => {
       "utf8",
     );
     const { view } = reconcileDocument(file);
-    // Both threads survive the self-heal write.
+    // Both threads survive the read-only reconcile.
     expect(view.threads).toHaveLength(2);
   });
 

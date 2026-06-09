@@ -33,6 +33,12 @@ export interface DocumentView {
   warning?: string;
 }
 
+interface BuiltDocumentView {
+  view: DocumentView;
+  healedThreads: Thread[];
+  healed: boolean;
+}
+
 // A content hash identifying the exact bytes on disk. Used both as the version
 // the client echoes back (expectedVersion) and as the optimistic-concurrency
 // guard for state-block writes.
@@ -47,7 +53,7 @@ function readFile(absolutePath: string): string {
 // Build the full view for the UI/agents: render, reconcile anchors against the
 // canonical text, summarize. A malformed block degrades to "no review state"
 // plus a warning rather than throwing — the document is still viewable.
-export function buildView(absolutePath: string, content: string): DocumentView {
+function buildDocumentView(absolutePath: string, content: string): BuiltDocumentView {
   const adapter = requireAdapterForPath(absolutePath);
   let state: EmbeddedState;
   let warning: string | undefined;
@@ -63,7 +69,7 @@ export function buildView(absolutePath: string, content: string): DocumentView {
   }
 
   const canonicalText = adapter.extractText(content);
-  const { statuses } = reconcile(canonicalText, state.threads);
+  const result = reconcile(canonicalText, state.threads);
   const rendered = adapter.render(content);
   const view: DocumentView = {
     path: absolutePath,
@@ -72,13 +78,21 @@ export function buildView(absolutePath: string, content: string): DocumentView {
     updatedAt: state.updatedAt,
     renderedHtml: rendered.html,
     threads: state.threads,
-    anchors: statuses,
+    anchors: result.statuses,
     summary: summarize(state.threads),
     canonicalText,
   };
   if (rendered.title) view.title = rendered.title;
   if (warning) view.warning = warning;
-  return view;
+  return {
+    view,
+    healedThreads: warning ? state.threads : result.healedThreads,
+    healed: warning ? false : result.changed,
+  };
+}
+
+export function buildView(absolutePath: string, content: string): DocumentView {
+  return buildDocumentView(absolutePath, content).view;
 }
 
 export function readDocument(absolutePath: string): DocumentView {
@@ -163,12 +177,13 @@ export function mutateState(
     const state = readStateForWrite(content, absolutePath);
     const canonicalText = adapter.extractText(content);
     const result = mutate({ threads: state.threads, canonicalText });
+    const healed = reconcile(canonicalText, result.threads);
     const bump = result.bumpUpdatedAt !== false;
 
     const nextState: EmbeddedState = {
       schemaVersion: SCHEMA_VERSION,
       updatedAt: bump ? new Date().toISOString() : state.updatedAt,
-      threads: result.threads,
+      threads: healed.healedThreads,
     };
     const nextContent = adapter.writeState(content, nextState);
     if (nextContent === content) {
@@ -191,32 +206,35 @@ export function mutateState(
   );
 }
 
-// Reconcile + lazily persist refreshed anchor hints. Returns the view and
-// whether a self-healing write happened. Intended for "on open / on external
-// change" — a state-block-only write that never races the editor (it merges
-// against the current on-disk threads via mutateState).
+// Reconcile the document without writing. Passive reads, opens, reloads, and
+// watcher ticks may use this to get fresh anchor statuses and pending healed
+// selector hints, but they must not rewrite the state block while an external
+// editor may still be working.
 export function reconcileDocument(absolutePath: string): {
+  view: DocumentView;
+  healed: boolean;
+  healedThreads: Thread[];
+} {
+  return buildDocumentView(absolutePath, readFile(absolutePath));
+}
+
+// Persist only refreshed selector hints, guarded by the version that produced
+// them. This is used for deliberate flush points (close/shutdown/quiet idle),
+// never for the immediate passive watcher response to an external edit.
+export function flushReconciledHints(
+  absolutePath: string,
+  expectedVersion: string,
+): {
   view: DocumentView;
   healed: boolean;
 } {
   let healed = false;
-  try {
-    // The heal runs INSIDE mutateState, as a transform over the threads on disk
-    // now — never a stale snapshot. A comment added between read and write
-    // therefore can't be dropped: it's part of ctx.threads when we reconcile.
-    const view = mutateState(absolutePath, undefined, (ctx) => {
-      const result = reconcile(ctx.canonicalText, ctx.threads);
-      healed = result.changed;
-      return { threads: result.healedThreads, bumpUpdatedAt: false };
-    });
-    return { view, healed };
-  } catch (error) {
-    if (error instanceof MalformedDocumentError) {
-      // Can't heal an unparseable block; return the warning-bearing view.
-      return { view: readDocument(absolutePath), healed: false };
-    }
-    throw error;
-  }
+  const view = mutateState(absolutePath, expectedVersion, (ctx) => {
+    const result = reconcile(ctx.canonicalText, ctx.threads);
+    healed = result.changed;
+    return { threads: result.healedThreads, bumpUpdatedAt: false };
+  });
+  return { view, healed };
 }
 
 export function resolveAbsolutePath(input: string): string {

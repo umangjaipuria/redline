@@ -178,6 +178,42 @@ test("shows orphaned state after an external document edit removes the anchored 
   }
 });
 
+test("passive browser reconcile does not rewrite the file after an external edit", async ({ page }) => {
+  const app = await startRedline(
+    page,
+    htmlFixture({
+      body: `
+        <main>
+          <p>Opening words before stable phrase continues after.</p>
+        </main>
+      `,
+      threads: [threadFixture({
+        id: "thread_passive_reconcile",
+        body: "This should stay anchored without a background write",
+        quote: "stable phrase",
+        prefix: "Opening words before ",
+        suffix: " continues after.",
+        posStart: 21,
+        posEnd: 34,
+      })],
+    }),
+  );
+  try {
+    const frame = await openDocument(page, app);
+    await expect(frame.locator('.redline-highlight[data-thread-id="thread_passive_reconcile"]')).toBeVisible();
+
+    const before = await readFile(app.filePath, "utf8");
+    const edited = before.replace("Opening words before stable phrase", "Opening words before a stable phrase");
+    await writeFile(app.filePath, edited, "utf8");
+
+    await expect(page.locator(".banner.notice")).toContainText("Document changed on disk", { timeout: 8_000 });
+    await expect(frame.locator('.redline-highlight[data-thread-id="thread_passive_reconcile"]')).toBeVisible();
+    expect(await readFile(app.filePath, "utf8")).toBe(edited);
+  } finally {
+    await app.stop();
+  }
+});
+
 test("keeps the comment rail synced while the reviewed iframe document scrolls", async ({ page }) => {
   const app = await startRedline(
     page,

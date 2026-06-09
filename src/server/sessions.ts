@@ -6,7 +6,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { reconcileDocument, versionFor, type DocumentView } from "../app";
+import { flushReconciledHints, reconcileDocument, versionFor, type DocumentView } from "../app";
 import { adapterForPath } from "../formats";
 import type { DocumentSessionInfo } from "../shared";
 import { generateDocId } from "./docid";
@@ -32,7 +32,13 @@ export interface DocumentSession {
   // reconcile) so the next poll re-validates against disk rather than trusting a
   // signature that might have been captured across an interleaved external edit.
   lastStat: StatSignature | null;
+  pendingHealedHints?: PendingHealedHints;
   subscribers: Set<Controller>;
+}
+
+interface PendingHealedHints {
+  version: string;
+  detectedAt: number;
 }
 
 interface StatSignature {
@@ -43,6 +49,11 @@ interface StatSignature {
 }
 
 const encoder = new TextEncoder();
+const DEFAULT_HEALED_HINT_FLUSH_QUIET_MS = 10_000;
+
+export interface SessionManagerOptions {
+  healedHintFlushQuietMs?: number;
+}
 
 // A cheap filesystem signature for change detection. null when the file is gone.
 // mtime+size alone can miss a same-length edit on a coarse-mtime filesystem;
@@ -73,8 +84,14 @@ export class SessionManager {
   private readonly byPath = new Map<string, string>(); // canonicalPath -> docId
   private readonly serverSubscribers = new Set<Controller>();
   private poll?: ReturnType<typeof setInterval>;
+  private readonly healedHintFlushQuietMs: number;
 
-  constructor(private readonly onDocsChanged: () => void = () => {}) {}
+  constructor(
+    private readonly onDocsChanged: () => void = () => {},
+    options: SessionManagerOptions = {},
+  ) {
+    this.healedHintFlushQuietMs = options.healedHintFlushQuietMs ?? DEFAULT_HEALED_HINT_FLUSH_QUIET_MS;
+  }
 
   // Open a document, or return the existing session for its canonical path.
   openOrGet(rawPath: string): { session: DocumentSession; opened: boolean } {
@@ -96,8 +113,9 @@ export class SessionManager {
       );
     }
 
-    // Reconcile on open (heals stale hints once, lazily).
-    const { view } = reconcileDocument(canonical);
+    // Reconcile on open so the browser sees fresh statuses. Do not write healed
+    // hints here; queue them for an idle/close flush instead.
+    const { view, healed } = reconcileDocument(canonical);
     const docId = generateDocId((candidate) => this.byDocId.has(candidate));
     const session: DocumentSession = {
       docId,
@@ -108,11 +126,12 @@ export class SessionManager {
       title: view.title,
       lastActiveAt: Date.now(),
       lastKnownVersion: view.version,
-      // null → the first poll re-validates against disk (reconcileDocument above
-      // may have written, and an external edit could interleave). Cheap: one read.
+      // null → the first poll re-validates against disk; an external edit could
+      // interleave while opening. Cheap: one read.
       lastStat: null,
       subscribers: new Set(),
     };
+    this.notePendingHeal(session, view, healed);
     this.byDocId.set(docId, session);
     this.byPath.set(canonical, docId);
     this.onDocsChanged();
@@ -136,6 +155,7 @@ export class SessionManager {
   close(docId: string): boolean {
     const session = this.byDocId.get(docId);
     if (!session) return false;
+    this.flushPendingHeal(session, { broadcast: false });
     this.broadcastDoc(session, "document.closed", { docId });
     for (const controller of session.subscribers) {
       try {
@@ -167,10 +187,8 @@ export class SessionManager {
   // Record the result of one of our own writes so the poll loop doesn't mistake
   // it for an external edit, and broadcast the mutation event.
   applyMutation(session: DocumentSession, view: DocumentView, event: string): void {
-    session.version = view.version;
-    session.updatedAt = view.updatedAt;
-    session.title = view.title;
-    session.lastKnownVersion = view.version;
+    updateSessionFromView(session, view);
+    session.pendingHealedHints = undefined;
     // Don't trust a post-write stat: an external edit could have interleaved
     // between our write and here. Force the next poll to validate by hash.
     session.lastStat = null;
@@ -236,6 +254,7 @@ export class SessionManager {
   }
 
   checkExternalChanges(): void {
+    const now = Date.now();
     for (const session of [...this.byDocId.values()]) {
       try {
         const stat = statSignature(session.path);
@@ -250,7 +269,10 @@ export class SessionManager {
         // skip the read + parse + render entirely. This is the common case every
         // tick for every idle document — the whole point of the poll being
         // affordable at many open docs.
-        if (sameStat(stat, session.lastStat)) continue;
+        if (sameStat(stat, session.lastStat)) {
+          this.flushPendingHealIfQuiet(session, now);
+          continue;
+        }
 
         // Stat moved but the bytes may still hash the same (our own atomic write,
         // or a touch). Confirm against the content hash before doing real work —
@@ -260,19 +282,19 @@ export class SessionManager {
           // Verified: these exact bytes match our tracked version. Safe to cache
           // this signature so the next tick takes the cheap path. (If an external
           // write had interleaved, the hash would differ and we'd reconcile.)
-          session.lastStat = stat;
+          const flushed = this.flushPendingHealIfQuiet(session, now);
+          if (!flushed) session.lastStat = stat;
           continue;
         }
 
-        // External edit detected. Reconcile (heal hints lazily) and announce.
-        const { view } = reconcileDocument(session.path);
-        session.version = view.version;
-        session.updatedAt = view.updatedAt;
-        session.title = view.title;
-        session.lastKnownVersion = view.version;
-        // reconcileDocument may self-heal-write here; leave lastStat null so the
-        // next tick re-validates by hash rather than trusting a possibly-raced
-        // post-write signature.
+        // External edit detected. Reconcile in memory and announce, but do not
+        // write healed hints back while an external editor may still be active.
+        const { view, healed } = reconcileDocument(session.path);
+        updateSessionFromView(session, view);
+        this.notePendingHeal(session, view, healed);
+        // Leave lastStat null so the next tick re-validates by hash rather than
+        // trusting a signature that might have been captured across an
+        // interleaved external edit.
         session.lastStat = null;
         this.broadcastDoc(session, "external.changed", {
           docId: session.docId,
@@ -296,6 +318,56 @@ export class SessionManager {
   registryDocs(): { docId: string; path: string }[] {
     return [...this.byDocId.values()].map((session) => ({ docId: session.docId, path: session.path }));
   }
+
+  private notePendingHeal(session: DocumentSession, view: DocumentView, healed: boolean): void {
+    if (healed && !view.warning) {
+      session.pendingHealedHints = { version: view.version, detectedAt: Date.now() };
+    } else {
+      session.pendingHealedHints = undefined;
+    }
+  }
+
+  private flushPendingHealIfQuiet(session: DocumentSession, now: number): boolean {
+    const pending = session.pendingHealedHints;
+    if (!pending) return false;
+    if (now - pending.detectedAt < this.healedHintFlushQuietMs) return false;
+    this.flushPendingHeal(session, { broadcast: true });
+    return true;
+  }
+
+  private flushPendingHeal(session: DocumentSession, options: { broadcast: boolean }): void {
+    const pending = session.pendingHealedHints;
+    if (!pending) return;
+
+    try {
+      const { view, healed } = flushReconciledHints(session.path, pending.version);
+      updateSessionFromView(session, view);
+      session.pendingHealedHints = undefined;
+      // We just wrote (or verified a no-op); force the next poll to validate by
+      // hash before caching a stat signature.
+      session.lastStat = null;
+      if (options.broadcast && healed) {
+        this.broadcastDoc(session, "anchors.reconciled", {
+          docId: session.docId,
+          version: view.version,
+          summary: summarizeAnchors(view),
+        });
+      }
+    } catch (error) {
+      session.pendingHealedHints = undefined;
+      session.lastStat = null;
+      // A concurrent edit or malformed state just means this cache-like hint
+      // flush was skipped. Do not advance lastKnownVersion here: if the file
+      // changed, the next watcher pass must still detect and broadcast it.
+    }
+  }
+}
+
+function updateSessionFromView(session: DocumentSession, view: DocumentView): void {
+  session.version = view.version;
+  session.updatedAt = view.updatedAt;
+  session.title = view.title;
+  session.lastKnownVersion = view.version;
 }
 
 function summarizeAnchors(view: DocumentView): {

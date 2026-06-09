@@ -331,6 +331,12 @@ bun run start                         <span class="c"># start empty, then open f
           the file — so apart from the review block, your document’s content stays byte-for-byte what your agent
           wrote.
         </p>
+        <p>
+          When the server notices the file changed on disk, it reconciles anchors in memory and refreshes the
+          browser without writing the file back. Redline only persists refreshed anchor hints when it is already
+          saving an intentional comment-state change, when the document closes, when the server shuts down, or
+          after the file has stayed quiet long enough for an idle flush.
+        </p>
 
         <h3>Comments are never silently lost</h3>
         <p>

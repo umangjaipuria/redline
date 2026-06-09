@@ -124,6 +124,8 @@ That block and marker are the **only** bytes Redline writes — the rest of the 
 
 Each thread anchors to its target by **selectors** — the exact `quote` plus a little surrounding `prefix`/`suffix` and an approximate position, not a fixed offset. Redline re-resolves every anchor against the current text on each load and render, with a fuzzy fallback, and classifies it as **anchored**, **needs-review** (low-confidence match, flagged), or **orphaned** (no match — kept in the rail with its last-known quote, never dropped). So when the agent rewrites text a comment was on, the comment follows the change automatically; only a wholesale rewrite orphans it, and even then it's surfaced for re-attachment, not lost. Agents never maintain anchors by hand.
 
+Passive reconcile is read-only. When the live server notices the file changed on disk, it refreshes the browser's rendered content and anchor states without rewriting the HTML. Refreshed selector hints are cache-like: Redline persists them only when it is already doing an intentional state write (`comment`, `reply`, `delete-thread`, `reanchor`, `apply`), when a document is closed or the server shuts down, or after the file has stayed quiet long enough for an idle flush.
+
 The page listens for server events, so updates an agent makes — through the file, the CLI, or the API — appear in the open browser without a reload.
 
 ## How agents talk to Redline
