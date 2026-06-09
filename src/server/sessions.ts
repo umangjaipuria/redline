@@ -49,7 +49,7 @@ interface StatSignature {
 }
 
 const encoder = new TextEncoder();
-const DEFAULT_HEALED_HINT_FLUSH_QUIET_MS = 10_000;
+const DEFAULT_HEALED_HINT_FLUSH_QUIET_MS = 30_000;
 
 export interface SessionManagerOptions {
   healedHintFlushQuietMs?: number;
