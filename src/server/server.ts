@@ -41,10 +41,15 @@ const publicDir = path.resolve(__dirname, "../../public");
 // landing page. Absent in some packaged builds — the endpoint reports null then.
 const howtoPath = path.resolve(__dirname, "../../docs/howto.html");
 const encoder = new TextEncoder();
+let embeddedStaticAssets = new Map<string, Blob>();
 
 export interface ServerHandlerContext {
   manager: SessionManager;
   serverInfo: () => ServerInfo;
+}
+
+export function setEmbeddedStaticAssets(assets: Array<{ route: string; file: Blob }>): void {
+  embeddedStaticAssets = new Map(assets.map((asset) => [normalizeStaticRoute(asset.route), asset.file]));
 }
 
 // A request handler bound to a session manager. Exposed for tests (drive it with
@@ -370,17 +375,23 @@ function serverEventStream(manager: SessionManager): Response {
 // --- static + assets -----------------------------------------------------
 
 function serveStatic(urlPath: string): Response {
-  const requested = urlPath === "/" ? "index.html" : urlPath.replace(/^\/+/, "");
+  const route = normalizeStaticRoute(urlPath === "/" ? "/index.html" : urlPath);
+  const embedded = embeddedStaticAssets.get(route);
+  if (embedded) return new Response(embedded, { headers: staticHeaders(route) });
+
+  const requested = route.replace(/^\/+/, "");
   for (const baseDir of [distDir, publicDir]) {
     const absolute = path.resolve(baseDir, requested);
     if (isInside(baseDir, absolute) && fs.existsSync(absolute) && fs.statSync(absolute).isFile()) {
-      return new Response(Bun.file(absolute), { headers: { "Cache-Control": "no-store" } });
+      return new Response(Bun.file(absolute), { headers: staticHeaders(route) });
     }
   }
   // SPA fallback: unknown non-API paths serve the client shell so deep links work.
+  const embeddedShell = embeddedStaticAssets.get("/index.html");
+  if (embeddedShell) return new Response(embeddedShell, { headers: staticHeaders("/index.html") });
   const shell = path.resolve(distDir, "index.html");
   if (fs.existsSync(shell)) {
-    return new Response(Bun.file(shell), { headers: { "Cache-Control": "no-store" } });
+    return new Response(Bun.file(shell), { headers: staticHeaders("/index.html") });
   }
   return new Response("Not found", { status: 404 });
 }
@@ -482,6 +493,26 @@ function corsHeaders(): Record<string, string> {
 function isInside(parent: string, child: string): boolean {
   const relative = path.relative(parent, child);
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function normalizeStaticRoute(route: string): string {
+  return `/${route.replace(/^\/+/, "")}`;
+}
+
+function staticHeaders(route: string): Record<string, string> {
+  const headers: Record<string, string> = { "Cache-Control": "no-store" };
+  const contentType = contentTypeFor(route);
+  if (contentType) headers["Content-Type"] = contentType;
+  return headers;
+}
+
+function contentTypeFor(route: string): string | undefined {
+  if (route.endsWith(".html")) return "text/html; charset=utf-8";
+  if (route.endsWith(".js")) return "text/javascript; charset=utf-8";
+  if (route.endsWith(".css")) return "text/css; charset=utf-8";
+  if (route.endsWith(".svg")) return "image/svg+xml";
+  if (route.endsWith(".woff2")) return "font/woff2";
+  return undefined;
 }
 
 // --- bootstrap -----------------------------------------------------------
@@ -630,8 +661,8 @@ function registerCleanup(cleanup: () => void): void {
   }
 }
 
-if (import.meta.main) {
-  const options = parseArgs(Bun.argv.slice(2));
+export async function runServerCli(args: string[]): Promise<void> {
+  const options = parseArgs(args);
   const reused = await reuseRunningServer(options);
   if (reused) {
     console.log(reused);
@@ -642,6 +673,10 @@ if (import.meta.main) {
   }
 }
 
+if (import.meta.main) {
+  await runServerCli(Bun.argv.slice(2));
+}
+
 // Build the browser client on demand so `bun run start` works on a fresh clone
 // with no separate build step. Builds when the bundle is missing OR incomplete
 // (e.g. an interrupted earlier build that left only some files) — routine runs
@@ -649,6 +684,7 @@ if (import.meta.main) {
 async function ensureClientBuilt(): Promise<void> {
   // All three are what the shell loads (index.html references main.js + style.css).
   const required = ["index.html", "main.js", "style.css"];
+  if (required.every((f) => embeddedStaticAssets.has(`/${f}`))) return;
   if (required.every((f) => fs.existsSync(path.resolve(distDir, f)))) return;
   console.log("Building the web client (first run)…");
   const { buildClient } = await import("../client/build");

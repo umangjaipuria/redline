@@ -95,13 +95,13 @@ bun run start docs/howto.html        # start the review server; prints a localho
 | `bun run check` | Typecheck (`tsc --noEmit`), run the Bun tests, and run the Playwright browser tests. |
 | `bun run coverage` | Run Bun test coverage. Reports are written under `.test-artifacts/coverage/unit/`. |
 | `bun run coverage:all` | Run Bun coverage plus Playwright browser V8 coverage. Browser coverage is summarized separately from Bun's source-line table. |
-| `bun run build:binary` | Build the client into `dist/`, then compile a standalone server executable to `./redline` via `bun build --compile`. |
+| `bun run build:binary` | Build the client into `dist/`, then compile a standalone server executable to `./redline` with the web client and static assets embedded. |
 | `bun run clean` | Remove local generated/install artifacts (`node_modules/`, `dist/`, `.test-artifacts/`, compiled `redline` binaries, and Bun compile scratch files). |
 
 Notes:
 
 - **The client is built automatically.** `bun run start` bundles the UI into `dist/` on first run (it's gitignored), so users never run a build step. **Only if you're editing the client source** (`src/client`) do you rebuild by hand with `build:client` afterward — auto-build fires only when the bundle is missing, not when it's stale, and `bun run dev` watches server code, not the client.
-- **`build:binary` is experimental.** It compiles the server into a single executable, but the web client and fonts are not yet embedded in the binary, so the full browser UI still needs `dist/` and `public/` alongside it. The HTTP API and CLI work from the binary as-is. For the complete experience, run from source.
+- **`build:binary` embeds the browser UI.** The compiled `./redline` executable serves the built client, favicon, and local fonts from the binary itself, so it does not need `dist/` or `public/` beside it at runtime.
 - **Run the CLI** either as `bun src/agent/cli.ts <command>` or, after `bun link`, as `redline <command>`. Every command takes a file path; it routes through a running server automatically when one has the file open, and otherwise edits the file directly.
 
 ## How review state lives in the file

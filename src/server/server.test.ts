@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { createRequestHandler, reuseRunningServer } from "./server";
+import { createRequestHandler, reuseRunningServer, setEmbeddedStaticAssets } from "./server";
 import { SessionManager } from "./sessions";
 import { writeServerRecord } from "./registry";
 import type { DocumentStateResponse, DocumentSessionInfo } from "../shared";
@@ -35,6 +35,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  setEmbeddedStaticAssets([]);
   manager.closeAll();
   fs.rmSync(dir, { recursive: true, force: true });
 });
@@ -90,6 +91,29 @@ describe("server-level docs", () => {
     fs.writeFileSync(txt, "hi");
     const res = await handler(req("POST", "/api/docs", { path: txt }));
     expect(res.status).toBe(415);
+  });
+});
+
+describe("static client", () => {
+  test("serves embedded assets before disk and uses the embedded shell fallback", async () => {
+    setEmbeddedStaticAssets([
+      { route: "/index.html", file: new Blob(["embedded shell"]) },
+      { route: "/main.js", file: new Blob(["console.log('embedded')"]) },
+    ]);
+
+    const shell = await handler(req("GET", "/"));
+    expect(shell.status).toBe(200);
+    expect(shell.headers.get("Content-Type")).toBe("text/html; charset=utf-8");
+    expect(await shell.text()).toBe("embedded shell");
+
+    const js = await handler(req("GET", "/main.js"));
+    expect(js.status).toBe(200);
+    expect(js.headers.get("Content-Type")).toBe("text/javascript; charset=utf-8");
+    expect(await js.text()).toBe("console.log('embedded')");
+
+    const fallback = await handler(req("GET", "/some/deep/link"));
+    expect(fallback.status).toBe(200);
+    expect(await fallback.text()).toBe("embedded shell");
   });
 });
 
