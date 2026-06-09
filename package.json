@@ -3,27 +3,32 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Local HTML review workspace for browser and AI-agent collaboration.",
+  "description": "Local review workspace for HTML documents, for browser and AI-agent collaboration.",
+  "bin": {
+    "redline": "src/agent/cli.ts"
+  },
   "scripts": {
-    "start": "bun src/server.ts",
-    "dev": "bun --watch src/server.ts",
-    "check": "bun test --coverage",
+    "start": "bun src/server/server.ts",
+    "dev": "bun src/dev.ts",
+    "build:client": "bun src/client/build.ts",
+    "build:binary": "bun src/build-binary.ts",
+    "clean": "rm -rf node_modules dist .test-artifacts redline redline-* ./*.bun-build ./.*.bun-build",
+    "redline": "bun src/agent/cli.ts",
+    "typecheck": "bunx tsc --noEmit -p tsconfig.json",
+    "check": "bun run typecheck && bun test && bun run test:browser",
     "test": "bun test",
-    "coverage": "bun test --coverage",
-    "agent:state": "bun src/agent.ts state",
-    "agent:comments": "bun src/agent.ts comments",
-    "agent:file": "bun src/agent.ts file",
-    "agent:comment": "bun src/agent.ts comment",
-    "agent:reply": "bun src/agent.ts reply",
-    "agent:delete-reply": "bun src/agent.ts delete-reply",
-    "agent:edit-comment": "bun src/agent.ts edit-comment",
-    "agent:resolve": "bun src/agent.ts resolve",
-    "agent:apply": "bun src/agent.ts apply"
+    "test:browser": "PLAYWRIGHT_BROWSERS_PATH=.test-artifacts/playwright/browsers playwright install chromium && bun run build:client -- --no-minify && PLAYWRIGHT_BROWSERS_PATH=.test-artifacts/playwright/browsers playwright test",
+    "coverage": "bun test --coverage --coverage-dir=.test-artifacts/coverage/unit",
+    "coverage:all": "bun run coverage && REDLINE_BROWSER_COVERAGE=1 bun run test:browser && bun tests/browser/summarize-coverage.ts"
   },
   "engines": {
     "bun": ">=1.3.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@types/bun": "^1.3.14"
+  },
+  "dependencies": {
+    "preact": "^10.29.2"
   }
 }

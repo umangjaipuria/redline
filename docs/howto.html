@@ -1,0 +1,391 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Redline — Quick start</title>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+
+      :root {
+        color-scheme: light;
+        --paper: #fcfcfd;
+        --panel: #f2f3f6;
+        --panel-deep: #e9ebf0;
+        --ink: #15171c;
+        --ink-soft: #565b66;
+        --ink-faint: #969ca7;
+        --line: #e6e8ee;
+        --line-soft: #eef0f4;
+        --red: #d23a1e;
+        --red-deep: #b32c12;
+        --red-wash: #fdeeea;
+
+        --display: "Fraunces", "Iowan Old Style", Georgia, serif;
+        --ui: "Hanken Grotesk", ui-sans-serif, system-ui, -apple-system, sans-serif;
+        --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        color: var(--ink);
+        background-color: var(--paper);
+        background-image:
+          radial-gradient(110% 60% at 50% -8%, #ffffff 0%, rgba(255, 255, 255, 0) 60%),
+          linear-gradient(180deg, #ffffff 0%, var(--paper) 240px);
+        background-attachment: fixed;
+        font-family: var(--ui);
+        font-size: 17px;
+        line-height: 1.68;
+        -webkit-font-smoothing: antialiased;
+        text-rendering: optimizeLegibility;
+      }
+
+      main {
+        width: min(100%, 712px);
+        margin: 0 auto;
+        padding: 72px 24px 96px;
+      }
+
+      /* ---------- masthead ---------- */
+
+      .wordmark {
+        display: flex;
+        align-items: baseline;
+        gap: 14px;
+      }
+      h1 {
+        margin: 0;
+        font-family: var(--display);
+        font-weight: 600;
+        font-size: clamp(3rem, 11vw, 4.4rem);
+        line-height: 0.98;
+        letter-spacing: -0.02em;
+      }
+      .wordmark .mark {
+        flex: none;
+        width: 0.62em;
+        height: 0.62em;
+        margin-bottom: 0.12em;
+        border-radius: 999px;
+        background: var(--red);
+        font-size: clamp(3rem, 11vw, 4.4rem);
+      }
+
+      .rule {
+        height: 4px;
+        margin: 22px 0 26px;
+        background: var(--red);
+        border-radius: 4px;
+      }
+
+      .tagline {
+        margin: 0;
+        font-family: var(--display);
+        font-weight: 500;
+        font-size: clamp(1.4rem, 4.4vw, 1.78rem);
+        line-height: 1.18;
+        letter-spacing: -0.01em;
+      }
+      .lede {
+        margin: 18px 0 0;
+        max-width: 58ch;
+        font-size: 1.08rem;
+        color: var(--ink-soft);
+      }
+      .lede strong { color: var(--ink); font-weight: 600; }
+      .lede mark.hl {
+        background: none;
+        color: var(--ink);
+        font-weight: 600;
+      }
+
+      /* ---------- sections ---------- */
+
+      section { margin-top: 60px; }
+
+      h2 {
+        margin: 0 0 6px;
+        font-family: var(--display);
+        font-weight: 600;
+        font-size: 1.62rem;
+        line-height: 1.15;
+        letter-spacing: -0.01em;
+      }
+
+      h3 {
+        margin: 30px 0 0;
+        font-family: var(--display);
+        font-weight: 600;
+        font-size: 1.12rem;
+        line-height: 1.3;
+      }
+
+      p { margin: 14px 0 0; }
+      h2 + p, h3 + p { margin-top: 10px; }
+      a {
+        color: var(--red-deep);
+        text-decoration-color: color-mix(in srgb, var(--red-deep) 35%, transparent);
+        text-underline-offset: 2px;
+      }
+      a:hover { text-decoration-color: var(--red-deep); }
+      strong { font-weight: 600; }
+      em { color: var(--ink-soft); font-style: italic; }
+
+      ul, ol { margin: 14px 0 0; padding-left: 1.25rem; }
+      li { margin: 9px 0 0; padding-left: 0.25rem; }
+      li::marker { color: var(--ink-faint); }
+
+      kbd {
+        font-family: var(--mono);
+        font-size: 0.8em;
+        padding: 0.12em 0.4em;
+        border-radius: 5px;
+        background: #fff;
+        border: 1px solid var(--line);
+        box-shadow: 0 1px 0 var(--line);
+        color: var(--ink);
+        white-space: nowrap;
+      }
+
+      /* ---------- code ---------- */
+
+      code {
+        font-family: var(--mono);
+        font-size: 0.85em;
+        padding: 0.1em 0.36em;
+        border-radius: 5px;
+        background: var(--panel);
+        border: 1px solid var(--line-soft);
+        color: var(--red-deep);
+      }
+
+      pre {
+        position: relative;
+        margin: 16px 0 0;
+        padding: 18px 20px;
+        overflow-x: auto;
+        background: #1a1c23;
+        border-radius: 12px;
+        font-size: 0.86rem;
+        line-height: 1.65;
+        color: #e7e9f0;
+        box-shadow: 0 1px 2px rgba(17, 19, 26, 0.18), 0 18px 40px -26px rgba(17, 19, 26, 0.55);
+      }
+      pre code {
+        padding: 0;
+        border: 0;
+        border-radius: 0;
+        background: none;
+        color: inherit;
+        font-size: inherit;
+      }
+      pre .c { color: #767d8c; }
+
+      /* ---------- "tell your agent" prompt card ---------- */
+
+      .say {
+        margin: 16px 0 0;
+        padding: 16px 18px 17px;
+        background: var(--red-wash);
+        border: 1px solid color-mix(in srgb, var(--red) 22%, var(--line));
+        border-radius: 14px;
+      }
+      .say .label {
+        display: block;
+        margin-bottom: 7px;
+        font-family: var(--mono);
+        font-size: 10.5px;
+        font-weight: 500;
+        letter-spacing: 0.13em;
+        text-transform: uppercase;
+        color: var(--red-deep);
+      }
+      .say p {
+        margin: 0;
+        font-family: var(--display);
+        font-size: 1.08rem;
+        line-height: 1.45;
+        color: var(--ink);
+      }
+      .say p + p { margin-top: 12px; }
+      .say .fname {
+        font-family: var(--mono);
+        font-size: 0.78em;
+        color: var(--red-deep);
+      }
+
+      /* ---------- note ---------- */
+
+      .note {
+        margin: 16px 0 0;
+        padding-left: 15px;
+        border-left: 3px solid var(--red);
+        color: var(--ink-soft);
+        font-size: 0.98rem;
+      }
+      .note strong { color: var(--ink); }
+
+      /* ---------- "good to know" ---------- */
+
+      .fine {
+        margin-top: 76px;
+        padding-top: 4px;
+      }
+      .fine .kicker {
+        font-family: var(--mono);
+        font-size: 11px;
+        font-weight: 500;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--ink-faint);
+      }
+
+      footer {
+        margin-top: 64px;
+        padding-top: 22px;
+        border-top: 1px solid var(--line);
+        color: var(--ink-faint);
+        font-size: 0.96rem;
+      }
+
+      @media (max-width: 560px) {
+        main { padding: 44px 18px 64px; }
+        body { font-size: 16.5px; }
+      }
+    </style>
+      <meta name="redline-agent-guide" content="Redline review document. Agents: use the redline-review skill; review state is in the #redline-state block.">
+  <script type="application/json" id="redline-state">{"schemaVersion":2,"updatedAt":"2026-06-09T05:28:08.012Z","threads":[{"id":"thread_ceb7523573d5467f","author":"Claude","createdAt":"2026-06-09T05:07:51.112Z","updatedAt":"2026-06-09T05:20:28.077Z","messages":[{"id":"message_f3bc2d2ba7d24a8b","author":"Claude","body":"This is a comment thread. Select any text in the document and a card like this shows up in the margin — try it on this sentence.","createdAt":"2026-06-09T05:07:51.112Z"}],"anchor":{"quote":"select a sentence and pin a comment to it","prefix":"ur browser so you can","suffix":"— then the agent reads your com","posStart":351,"posEnd":392}},{"id":"thread_a34abc5406c24b90","author":"User","createdAt":"2026-06-09T05:08:12.377Z","updatedAt":"2026-06-09T05:08:12.406Z","messages":[{"id":"message_e8877da302fb410d","author":"User","body":"What happens to one of my comments if the agent rewrites the whole paragraph it was attached to?","createdAt":"2026-06-09T05:08:12.377Z"},{"id":"message_0acf363a1c074d61","author":"Claude","body":"It’s re-found automatically when the wording just shifts. If a rewrite is too drastic to match, it’s set aside as orphaned — kept in the margin with its original text so you can re-attach it. Never dropped.","createdAt":"2026-06-09T05:08:12.406Z"}],"anchor":{"quote":"set aside as orphaned","prefix":"flagged needs review or","suffix":"— kept in the margin with its o","posStart":4501,"posEnd":4522}},{"id":"thread_c8bed887216a45fb","author":"User","createdAt":"2026-06-09T05:08:12.431Z","updatedAt":"2026-06-09T05:08:12.431Z","messages":[{"id":"message_25784a71f82b4d4e","author":"User","body":"Confirmed — this is what lets me review confidential specs without anything leaving my machine.","createdAt":"2026-06-09T05:08:12.431Z"}],"anchor":{"quote":"Your documents never leave your laptop","prefix":"The server binds to 127.0.0.1.","suffix":". You can bind it wide","posStart":3789,"posEnd":3827}},{"id":"thread_e097969026e14606","author":"User","createdAt":"2026-06-09T05:26:52.057Z","updatedAt":"2026-06-09T05:28:08.011Z","messages":[{"id":"message_9bb6c85f6b9b4248","author":"User","body":"This is great! How is this possible?","createdAt":"2026-06-09T05:26:52.057Z"},{"id":"message_899e0643a7654990","author":"Claude","body":"No database behind it — your comments live in a single JSON block inside this file's \u003chead>. Commit the doc to git, email it, hand it to a coworker: the whole thread rides along. Reopen it and everything's still here.","createdAt":"2026-06-09T05:28:08.011Z"}],"anchor":{"quote":"comments live inside the HTML","prefix":"replies back in it. The","suffix":"file. No database, no sidecar,","posStart":487,"posEnd":516}}]}</script>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div class="wordmark">
+          <h1>Redline</h1>
+          <span class="mark" aria-hidden="true"></span>
+        </div>
+        <div class="rule"></div>
+        <p class="tagline">Mark up your agent’s docs like a Google&nbsp;Doc.</p>
+        <p class="lede">
+          <mark class="hl">Stop dropping back into a chat window to describe which sentence you meant.</mark>
+          Your agent writes specs, plans, and PRDs in HTML now. Redline opens the doc in your browser so you can
+          select a sentence and pin a comment to it — then the agent reads your comments, rewrites the doc, and
+          replies back in it. <strong>The comments live inside the HTML file.</strong> No database, no sidecar,
+          nothing to sync.
+        </p>
+      </header>
+
+      <section>
+        <h2>Run it</h2>
+        <p>One dependency: <a href="https://bun.sh">Bun</a> ≥ 1.3. Clone, install, point it at any HTML file.</p>
+        <pre><code>git clone https://github.com/umangjaipuria/redline &amp;&amp; cd redline
+bun install
+bun run start docs/howto.html</code></pre>
+        <p>
+          It prints a <code>localhost</code> URL — open it. The first run spends a few seconds building the browser
+          UI; every run after that is instant. A file chooser is always a click away in the UI — open another doc any
+          time, or start with no file and Redline opens straight to it.
+        </p>
+
+        <h3>Or compile it to a binary</h3>
+        <p>Build a standalone binary:</p>
+        <pre><code>bun run build:binary
+./redline your-doc.html</code></pre>
+        <p>
+          The whole UI is baked into <code>./redline</code> — no dependencies to install, nothing like Bun,
+          <code>node_modules</code>, or a <code>dist/</code> folder to keep beside it. Copy it wherever and it just runs.
+        </p>
+      </section>
+
+      <section>
+        <h2>Set up the Redline skill for your agent</h2>
+        <p>
+          Your agent drives Redline through a skill called <strong>redline-review</strong>. Symlink it into the
+          skills directory once and never think about it again:
+        </p>
+        <pre><code><span class="c"># Claude Code</span>
+ln -s "$(pwd)/.claude/skills/redline-review" ~/.claude/skills/redline-review
+
+<span class="c"># Codex</span>
+ln -s "$(pwd)/.agents/skills/redline-review" ~/.agents/skills/redline-review</code></pre>
+        <p>Some other agent? Point it at this repo’s <code>AGENTS.md</code> — same playbook, no skill needed.</p>
+        <div class="say">
+          <span class="label">Or just say this</span>
+          <p>“Clone github.com/umangjaipuria/redline, install the redline-review skill, then open <span class="fname">spec.html</span> in Redline for me.”</p>
+        </div>
+      </section>
+
+      <section>
+        <h2>Comment. Hand it back. Repeat.</h2>
+        <p>
+          Set your name in the top bar so your comments are attributed to you. Then select text — a <strong>Comment</strong>
+          button shows up (or hit <kbd>⌘⇧M</kbd> / <kbd>Ctrl⇧M</kbd>). Write your comment; it anchors to the exact words
+          and drops a card in the margin. Reply to keep a thread going, edit your own messages, delete a thread once
+          it’s handled.
+        </p>
+        <p>Done leaving comments? Hand it over:</p>
+        <div class="say">
+          <span class="label">Tell the agent that wrote it</span>
+          <p>“I left comments in Redline on <span class="fname">spec.html</span>. Read them with the redline-review skill, revise the doc, and reply to each thread.”</p>
+        </div>
+        <p>
+          The agent edits the file directly, replies inline with what it changed, and clears the threads it resolved.
+          Its edits land in your open tab live — no refresh. Read what moved, leave more comments, go again until it’s right.
+        </p>
+        <div class="note">
+          <strong>Agents don’t poll.</strong> Each round, tell it to look again — it won’t notice new comments on its own.
+        </div>
+      </section>
+
+      <section>
+        <h2>Let the agent do the legwork</h2>
+        <p>Most of the setup above is stuff you can just delegate. A few lines worth saying out loud:</p>
+        <div class="say">
+          <span class="label">Pick one</span>
+          <p>“Open <span class="fname">changelog.html</span> in Redline.”</p>
+          <p>“Build the redline binary and open this doc in it.”</p>
+          <p>“Read my Redline comments on the PRD and push back on anything you disagree with before editing.”</p>
+        </div>
+      </section>
+
+      <div class="fine">
+        <span class="kicker">Good to know</span>
+      </div>
+
+      <section style="margin-top: 22px;">
+        <h3>It stays on your machine</h3>
+        <p>
+          The server binds to <code>127.0.0.1</code>. Your documents never leave your laptop. You <em>can</em> bind it
+          wider, but that’s off by default — the local API isn’t authenticated, so don’t expose it without thinking.
+        </p>
+
+        <h3>The comments ride inside the file</h3>
+        <p>
+          No database, no sidecar. Every thread lives in one inert JSON block in the HTML. Commit the file to git, send
+          it to a coworker — the open review travels with it, and the rest of the document stays byte-for-byte what your
+          agent wrote.
+        </p>
+
+        <h3>Nothing gets silently dropped</h3>
+        <p>
+          Agent reworded the sentence your comment sat on? The comment follows it. Nuked the whole paragraph? It’s
+          flagged <em>needs review</em> or set aside as <em>orphaned</em> — kept in the margin with its original text so
+          you can re-attach it. Comments are never just deleted out from under you.
+        </p>
+
+        <h3>You review; the agent writes</h3>
+        <p>
+          In this version you comment and the agent owns the text — there’s no direct editing in the page. You point;
+          it types.
+        </p>
+      </section>
+
+      <footer>
+        This page is itself a Redline document. Select this sentence and leave a comment — that’s the whole pitch.
+      </footer>
+    </main>
+  </body>
+</html>

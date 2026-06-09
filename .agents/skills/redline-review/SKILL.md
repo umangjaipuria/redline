@@ -1,1 +1,0 @@
-../../../.claude/skills/redline-review/SKILL.md
