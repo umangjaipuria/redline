@@ -250,6 +250,12 @@ export class DocumentViewer {
     win.scrollTo(position.left, position.top);
   }
 
+  clearSelection(): void {
+    const selection = this.doc()?.getSelection?.();
+    selection?.removeAllRanges();
+    this.callbacks.onSelection(null);
+  }
+
   scrollMetrics(): { clientHeight: number; scrollHeight: number; scrollTop: number } | null {
     const doc = this.doc();
     const win = this.iframe.contentWindow;

@@ -76,7 +76,7 @@ test("paints embedded anchors and activates the matching rail card from an ifram
   }
 });
 
-test("creates a persisted comment from a real iframe text selection", async ({ page }) => {
+test("creates a persisted comment from a real iframe text selection and clears the selection", async ({ page }) => {
   const app = await startRedline(
     page,
     htmlFixture({
@@ -96,6 +96,9 @@ test("creates a persisted comment from a real iframe text selection", async ({ p
     await page.getByLabel("Post comment").click();
 
     await expect(page.locator(".thread-card")).toContainText("Browser selection works");
+    await expect.poll(() => frame.evaluate(() => document.getSelection()?.toString() ?? "")).toBe("");
+    await expect(frame.locator(".redline-highlight[data-thread-id]")).toHaveCount(1);
+    await expect(frame.locator(".redline-highlight[data-thread-id]")).toHaveText("exact phrase");
     const saved = await readFile(app.filePath, "utf8");
     expect(saved).toContain('id="redline-state"');
     expect(saved).toContain("Browser selection works");

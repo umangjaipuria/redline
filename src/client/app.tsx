@@ -596,7 +596,7 @@ export function App() {
     );
     setComposerOpen(false);
     setComposerSelection(null);
-    setSelection(null);
+    viewerRef.current?.clearSelection();
     const created = next.threads.find((t) => !prev.has(t.id));
     if (created) {
       skipNextActiveThreadDocumentScrollRef.current.add(created.id);
@@ -804,7 +804,7 @@ export function App() {
             onReanchor={(threadId) =>
               selection
                 ? withWrite(() => api.reanchor(docId, threadId, selection.quote, undefined, state.version)).then(() =>
-                    setSelection(null),
+                    viewerRef.current?.clearSelection(),
                   )
                 : Promise.resolve()
             }
