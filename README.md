@@ -1,12 +1,18 @@
 # Redline
 
-Agents write more and more of our plans, specs, and docs — and increasingly they write them in HTML rather than Markdown, because HTML renders into something a human can actually read, navigate, and react to. (See Thariq Shihipar's ["HTML is the new markdown"](https://x.com/trq212/status/2052811606032269638).)
+Agents write more and more of our plans, specs, and docs — and increasingly in HTML rather than Markdown, because HTML renders into something a human can easily read, navigate, and react to. (See Thariq Shihipar's ["HTML is the new markdown"](https://x.com/trq212/status/2052811606032269638).)
 
-But giving feedback on those documents is still painful. You read the rendered page, then drop back into a chat window to describe — in prose — which sentence you meant and what's wrong with it. The agent guesses at the mapping, edits, and you scroll back to check. Iterating this way is slow and lossy.
+But collaborating on those documents with your AI agent — asking questions, digging into a specific line, pushing back — is still painful. You read the rendered page, then drop back into a chat window to paste a snippet, type your reaction, paste the next, and so on. The agent guesses at what you meant, edits, and you scroll back to check. Slow and lossy.
 
-This is a solved problem everywhere else. Every modern word processor lets you select text and leave a comment in the margin. Enter Redline.
+Enter Redline — a local app that opens an agent-written HTML document in your browser and lets you comment on it like a Google Doc. Select text, leave a comment, reply. Your agent reads those comments, revises the document, and replies inline. The document and all of its open review state live in the same HTML file, so there's nothing extra to sync.
 
-Redline is a local app that opens an agent-written HTML document in your browser and lets you comment on it like a Google Doc — select text, leave a note in the margin, reply. Your agent reads those comments, revises the document, and replies inline. The document and all of its open review state live in the same HTML file, so nothing extra to sync.
+**Why Redline**
+
+- **Local and private.** The server runs on your machine and binds to `127.0.0.1` — your documents never leave your computer.
+- **Made for complex docs.** Anchored, in-margin comments beat describing "the third bullet under *Rollout*" in a chat box. The longer and denser the document, the bigger the win.
+- **HTML-first.** You review the rendered document your agent actually wrote — not a flattened Markdown stand-in.
+- **Use any agent.** Claude Code, Codex, Cursor, opencode, OpenClaw — anything that can follow a skill or an `AGENTS.md` and run a CLI.
+- **Lives in one file.** No database, no sidecar: comments sit in a single block inside the HTML. Commit it to git or send it to a coworker and the open review travels with it.
 
 ![Redline reviewing an HTML document, with comments anchored in the margin](media/screenshot.png)
 
@@ -15,7 +21,7 @@ Redline is a local app that opens an agent-written HTML document in your browser
 1. **Clone the repo.**
 
    ```bash
-   git clone <repo-url> redline && cd redline
+   git clone https://github.com/umangjaipuria/redline.git && cd redline
    ```
 
 2. **Install dependencies** (requires [Bun](https://bun.sh) ≥ 1.3).
@@ -24,16 +30,7 @@ Redline is a local app that opens an agent-written HTML document in your browser
    bun install
    ```
 
-3. **Run the tests** to confirm everything works.
-
-   ```bash
-   bun run check
-   ```
-
-   The first browser-test run installs Playwright's Chromium into `.test-artifacts/playwright/browsers/`
-   inside the repo. `.test-artifacts/` is gitignored and can be deleted at any time.
-
-4. **Install the review skill** so your agent knows how to work with Redline documents. Symlink it into your agent's skills directory:
+3. **Install the review skill** so your agent knows how to work with Redline documents. Symlink it into your agent's skills directory:
 
    ```bash
    # Claude Code
@@ -45,7 +42,7 @@ Redline is a local app that opens an agent-written HTML document in your browser
 
    Any other agent can be pointed at this repo's `AGENTS.md`, which carries the same guidance.
 
-5. **Open a document.** Pass any HTML file; Redline serves it and prints a localhost URL to open in your browser. The first run builds the browser UI automatically (a few seconds); after that it starts instantly.
+4. **Open a document.** Pass any HTML file; Redline serves it and prints a localhost URL to open in your browser. The first run builds the browser UI automatically (a few seconds); after that it starts instantly.
 
    ```bash
    bun run start docs/howto.html
@@ -59,19 +56,13 @@ Redline is a local app that opens an agent-written HTML document in your browser
    bun run start
    ```
 
-   Use another port when needed:
-
-   ```bash
-   bun run start docs/howto.html --port 7332
-   ```
-
    Run `bun run start --help` to see all command-line options.
 
-6. **Leave comments.** Select text in the rendered document, click `Comment` (or press `Cmd+Shift+M`), and write your note. Reply to threads, edit your own messages, or delete a thread once it's handled. In the top bar, set your author name so comments are attributed to you, and show or hide the comments rail. You're the reviewer here — your agent owns the document's text and makes the actual edits; your comments are saved inside the same HTML file.
+5. **Leave comments.** Select text in the rendered document, click `Comment` (or press `Cmd+Shift+M`), and write your comment. Reply to threads, edit your own messages, or delete a thread once it's handled. In the top bar, set your author name so comments are attributed to you, and show or hide the comments rail. You're the reviewer here — your agent owns the document's text and makes the actual edits; your comments are saved inside the same HTML file.
 
-7. **Ask your agent to review the comments.** Tell Claude (or whichever agent wrote the doc) to review the open comments using the **redline-review** skill. It reads the threads, revises the document, replies to each thread with what changed, and deletes the threads that are fully resolved. The skill tells the agent how to find the running Redline instance on its own; if it can't, just give it the localhost URL the server printed.
+6. **Ask your agent to review the comments.** Tell Claude (or whichever agent wrote the doc) to review the open comments using the **redline-review** skill. It reads the threads, revises the document, replies to each thread with what changed, and deletes the threads that are fully resolved. The skill tells the agent how to find the running Redline instance on its own; if it can't, just give it the localhost URL the server printed.
 
-8. **Iterate.** Agent edits show up live in the open browser. Read the replies, leave new comments, and go again until the document is right. The agent doesn't watch for new comments on its own, so each time you finish a round of comments, tell it to review them again.
+7. **Iterate.** Agent edits show up live in the open browser. Read the replies, leave new comments, and go again until the document is right. The agent doesn't watch for new comments on its own, so each time you finish a round of comments, tell it to review them again.
 
 ## Building and running
 
@@ -106,7 +97,9 @@ Notes:
 
 ## How review state lives in the file
 
-Redline keeps the document and all of its open review state in the one HTML file — no database, no sidecar. Comment threads are stored in a single inert JSON block in the `<head>`:
+Everything lives in one HTML file — no database, no sidecar.
+
+**The state block.** Comment threads are stored in a single inert JSON block in the `<head>`:
 
 ```html
 <script type="application/json" id="redline-state">
@@ -114,19 +107,23 @@ Redline keeps the document and all of its open review state in the one HTML file
 </script>
 ```
 
-The first time Redline writes to a file it also stamps a one-line discovery marker, so a fresh agent opening the file later knows it's a Redline document and which skill to use:
+**The discovery marker.** On first write, Redline stamps a one-line marker so agents know to use the `redline-review` skill:
 
 ```html
 <meta name="redline-agent-guide" content="Redline review document. Agents: use the redline-review skill; review state is in the #redline-state block.">
 ```
 
-That block and marker are the **only** bytes Redline writes — the rest of the document stays byte-for-byte what the author wrote. There are no inline anchor markers; highlights are drawn in the browser at view time, not saved to disk. When the last thread is deleted, the block is removed entirely.
+That block and marker are the **only** bytes Redline adds — the rest of the document stays byte-for-byte what the author wrote. No inline anchor markers; highlights are drawn in the browser at view time. When the last thread is deleted, the block is removed entirely.
 
-Each thread anchors to its target by **selectors** — the exact `quote` plus a little surrounding `prefix`/`suffix` and an approximate position, not a fixed offset. Redline re-resolves every anchor against the current text on each load and render, with a fuzzy fallback, and classifies it as **anchored**, **needs-review** (low-confidence match, flagged), or **orphaned** (no match — kept in the rail with its last-known quote, never dropped). So when the agent rewrites text a comment was on, the comment follows the change automatically; only a wholesale rewrite orphans it, and even then it's surfaced for re-attachment, not lost. Agents never maintain anchors by hand.
+**Anchoring.** Each thread anchors by `quote` plus a little surrounding `prefix`/`suffix`, not a fixed offset. On every load, Redline re-resolves each anchor against the current text (with a fuzzy fallback) and classifies it as:
 
-Passive reconcile is read-only. When the live server notices the file changed on disk, it refreshes the browser's rendered content and anchor states without rewriting the HTML. Refreshed selector hints are cache-like: Redline persists them only when it is already doing an intentional state write (`comment`, `reply`, `delete-thread`, `reanchor`, `apply`), when a document is closed or the server shuts down, or after the file has stayed quiet long enough for an idle flush.
+- **anchored** — clean match
+- **needs-review** — low-confidence match, flagged
+- **orphaned** — no match, kept in the rail with its last-known quote
 
-The page listens for server events, so updates an agent makes — through the file, the CLI, or the API — appear in the open browser without a reload.
+When the agent rewrites text a comment was on, the comment follows automatically. Only a wholesale rewrite orphans it — and even then it surfaces for re-attachment, not disappears. Agents never maintain anchors by hand.
+
+**Live updates.** When the server notices the file changed on disk, it refreshes the browser's rendered content and anchor states without rewriting the HTML. Agent edits — through the file, CLI, or API — appear in the open browser without a reload.
 
 ## How agents talk to Redline
 
