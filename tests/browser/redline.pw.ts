@@ -317,7 +317,7 @@ async function startRedline(page: Page, html: string): Promise<RedlineInstance> 
   const origin = `http://127.0.0.1:${port}`;
   const server = spawn("bun", ["src/server/server.ts", "--port", String(port)], {
     cwd: ROOT,
-    env: { ...process.env, HOME: homeDir },
+    env: { ...process.env, HOME: homeDir, REDLINE_NO_BROWSER: "1" },
     stdio: ["ignore", "pipe", "pipe"],
   });
   const logs = captureLogs(server);

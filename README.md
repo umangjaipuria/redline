@@ -42,7 +42,7 @@ Enter Redline — a local app that opens an agent-written HTML document in your 
 
    Any other agent can be pointed at this repo's `AGENTS.md`, which carries the same guidance.
 
-4. **Open a document.** Pass any HTML file; Redline serves it and prints a localhost URL to open in your browser. The first run builds the browser UI automatically (a few seconds); after that it starts instantly.
+4. **Open a document.** Pass any HTML file; Redline serves it, opens the localhost URL in your browser, and prints the URL too. The first run builds the browser UI automatically (a few seconds); after that it starts instantly.
 
    ```bash
    bun run start docs/howto.html
@@ -72,13 +72,13 @@ client, which Bun bundles to `dist/`.
 
 ```bash
 bun install                          # install dependencies (Preact)
-bun run start docs/howto.html        # start the review server; prints a localhost URL (default :7331)
+bun run start docs/howto.html        # start the review server; opens and prints a localhost URL (default :7331)
 ```
 
 | Command | What it does |
 | --- | --- |
 | `bun run build:client` | Bundle the Preact client (`src/client`) to `dist/`. `bun run start` does this automatically on first run; run it by hand to rebuild after changing client code. |
-| `bun run start [file] [--port N] [--host H]` | Start the server. With a file it opens that document; with none, the browser prompts you to pick one. **If a Redline server is already running, the file is opened on that server** (one shared server holds many documents) and its URL is printed — pass `--port N` to run a separate server on another port instead. Binds to `127.0.0.1` by default; binding elsewhere needs `REDLINE_ALLOW_REMOTE=1` because the local API is unauthenticated. |
+| `bun run start [file] [--port N] [--host H]` | Start the server and open the browser. With a file it opens that document; with none, the browser prompts you to pick one. **If a Redline server is already running, the file is opened on that server**; bare start reopens the server already on the requested port. One shared server holds many documents, and its URL is printed and opened — pass `--port N` to run a separate server on another port instead. Binds to `127.0.0.1` by default; binding elsewhere needs `REDLINE_ALLOW_REMOTE=1` because the local API is unauthenticated. |
 | `bun run dev` | Start the server with `--watch` (auto-restart on server-code changes). The client bundle is not watched — re-run `build:client` after client edits. |
 | `bun src/agent/cli.ts <command>` | The `redline` CLI (see [How agents talk to Redline](#how-agents-talk-to-redline)). Run `bun link` once to expose it globally as `redline`. |
 | `bun test` | Run the test suite. |

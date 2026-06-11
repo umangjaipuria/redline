@@ -351,8 +351,8 @@ describe("reuseRunningServer (start reuses a running server)", () => {
   function fakeFetchTo(h: typeof handler): typeof fetch {
     return ((input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input.toString();
-      const rest = url.replace("http://server.local/", "");
-      return h(new Request(`http://127.0.0.1/${rest}`, init));
+      const parsed = new URL(url);
+      return h(new Request(`http://127.0.0.1${parsed.pathname}${parsed.search}`, init));
     }) as unknown as typeof fetch;
   }
 
@@ -369,22 +369,41 @@ describe("reuseRunningServer (start reuses a running server)", () => {
   test("opens the file on the running server instead of binding a second one", async () => {
     const serversDir = path.join(dir, "servers");
     registerSelf(serversDir);
-    const msg = await reuseRunningServer(
+    const result = await reuseRunningServer(
       { documentPath: file, host: "127.0.0.1", port: 7331 },
       { serversDir, fetchImpl: fakeFetchTo(handler) },
     );
-    expect(msg).not.toBeNull();
-    expect(msg).toContain("already running");
-    expect(msg).toContain("URL: http://server.local/?doc=doc_");
-    expect(msg).toContain("To start a fresh Redline server instead");
-    expect(msg).toContain(`bun run start ${file} --port 7332`);
-    expect(msg).toMatch(/\?doc=doc_/);
+    expect(result).not.toBeNull();
+    expect(result!.url).toMatch(/^http:\/\/server\.local\/\?doc=doc_/);
+    expect(result!.message).toContain("already running");
+    expect(result!.message).toContain("URL: http://server.local/?doc=doc_");
+    expect(result!.message).toContain("To start a fresh Redline server instead");
+    expect(result!.message).toContain(`bun run start ${file} --port 7332`);
+    expect(result!.message).toMatch(/\?doc=doc_/);
     // The doc is now open on that server.
     const list = await (await handler(req("GET", "/api/docs"))).json();
     expect(list.docs).toHaveLength(1);
   });
 
-  test("returns null (start fresh) with --port or no file", async () => {
+  test("bare start reuses a running server on the requested port", async () => {
+    const serversDir = path.join(dir, "servers");
+    writeServerRecord(serversDir, {
+      url: "http://127.0.0.1:7331/",
+      pid: process.pid,
+      startedAt: new Date().toISOString(),
+      docs: [],
+    });
+    const result = await reuseRunningServer(
+      { host: "127.0.0.1", port: 7331 },
+      { serversDir, fetchImpl: fakeFetchTo(handler) },
+    );
+    expect(result).not.toBeNull();
+    expect(result!.url).toBe("http://127.0.0.1:7331/");
+    expect(result!.message).toContain("Redline is already running");
+    expect(result!.message).toContain("URL: http://127.0.0.1:7331/");
+  });
+
+  test("returns null (start fresh) with --port on a document or no server on the requested port", async () => {
     const serversDir = path.join(dir, "servers");
     registerSelf(serversDir);
     const fetchImpl = fakeFetchTo(handler);

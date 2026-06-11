@@ -22,6 +22,7 @@ import {
   readDocument,
 } from "../app";
 import { expandPath } from "../server/files";
+import { openBrowserTab, type OpenBrowser } from "../server/browser";
 import {
   SERVERS_DIR,
   findServerForPath,
@@ -36,13 +37,15 @@ const serverEntry = path.resolve(__dirname, "../server/server.ts");
 export interface CliDeps {
   serversDir: string;
   fetchImpl: typeof fetch;
-  startServer: (file: string, deps: CliDeps) => Promise<ServerRecord>;
+  startServer: (file: string | undefined, deps: CliDeps) => Promise<ServerRecord>;
+  openBrowser: OpenBrowser;
 }
 
 const defaultDeps: CliDeps = {
   serversDir: SERVERS_DIR,
   fetchImpl: globalThis.fetch,
   startServer: spawnServer,
+  openBrowser: openBrowserTab,
 };
 
 export interface CliResult {
@@ -64,6 +67,7 @@ export async function runCli(argv: string[], overrides: Partial<CliDeps> = {}): 
 async function dispatch(command: string | undefined, args: string[], deps: CliDeps): Promise<string> {
   switch (command) {
     case undefined:
+      return openHome(deps);
     case "-h":
     case "--help":
       return helpText();
@@ -322,7 +326,15 @@ async function openDoc(file: string, deps: CliDeps): Promise<string> {
   const canonical = path.resolve(file);
   if (!fs.existsSync(canonical)) throw new Error(`Not a file: ${canonical}`);
   const { url, docId } = await ensureServerWithDoc(canonical, deps);
-  return `Redline is serving ${canonical}\n${url}?doc=${docId}`;
+  const browserUrl = docUrl(url, docId);
+  await deps.openBrowser(browserUrl);
+  return `Redline is serving ${canonical}\n${browserUrl}`;
+}
+
+async function openHome(deps: CliDeps): Promise<string> {
+  const { url } = await ensureServer(deps);
+  await deps.openBrowser(url);
+  return `Redline is serving\n${url}`;
 }
 
 async function resolveDocId(file: string, deps: CliDeps): Promise<string> {
@@ -379,6 +391,18 @@ async function ensureServerWithDoc(
   return { url: record.url, docId };
 }
 
+async function ensureServer(deps: CliDeps): Promise<{ url: string }> {
+  const running = readServerRecords(deps.serversDir);
+  if (running.length > 0) return { url: running[0]!.url };
+
+  const record = await deps.startServer(undefined, deps);
+  return { url: record.url };
+}
+
+function docUrl(url: string, docId: string): string {
+  return `${url}?doc=${encodeURIComponent(docId)}`;
+}
+
 // --- HTTP helpers --------------------------------------------------------
 
 async function getJson(deps: CliDeps, url: string): Promise<unknown> {
@@ -409,21 +433,29 @@ async function sendJson(deps: CliDeps, method: string, url: string, body?: unkno
 }
 
 // Start a detached server process and wait for it to register the document.
-async function spawnServer(file: string, deps: CliDeps): Promise<ServerRecord> {
-  const child = spawn("bun", [serverEntry, file], {
+async function spawnServer(file: string | undefined, deps: CliDeps): Promise<ServerRecord> {
+  const child = spawn("bun", file ? [serverEntry, file] : [serverEntry], {
     detached: true,
+    env: { ...process.env, REDLINE_NO_BROWSER: "1" },
     stdio: "ignore",
   });
   child.unref();
 
-  const canonical = path.resolve(file);
+  const canonical = file ? path.resolve(file) : undefined;
   const deadline = Date.now() + 8000;
   while (Date.now() < deadline) {
-    const record = findServerForPath(canonical, deps.serversDir);
-    if (record) return record;
+    if (canonical) {
+      const record = findServerForPath(canonical, deps.serversDir);
+      if (record) return record;
+    }
+    const pid = child.pid;
+    if (pid !== undefined) {
+      const record = readServerRecords(deps.serversDir).find((entry) => entry.pid === pid);
+      if (record) return record;
+    }
     await delay(150);
   }
-  throw new Error("Started a server but it did not register the document in time.");
+  throw new Error("Started a server but it did not register in time.");
 }
 
 function delay(ms: number): Promise<void> {
@@ -479,7 +511,8 @@ function helpText(): string {
   return `Redline CLI
 
 Launch & session:
-  redline <file>                       Open/focus a document; print its URL.
+  redline                              Open/focus Redline; open and print its URL.
+  redline <file>                       Open/focus a document; open and print its URL.
   redline close <file>                 Close a document on its server.
   redline servers                      List running servers and their open docs.
   redline docid <file>                 Resolve a file path to its docId.

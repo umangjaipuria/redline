@@ -25,6 +25,7 @@ import type {
 } from "../shared";
 import { isDocId } from "./docid";
 import { FileBrowseError, expandPath, listDirectory, pickFileNativeDialog } from "./files";
+import { openBrowserTab, type OpenBrowser } from "./browser";
 import {
   SERVERS_DIR,
   readServerRecords,
@@ -524,20 +525,44 @@ export interface ServerOptions {
   portExplicit?: boolean; // user passed --port — start a distinct instance there
 }
 
+export interface ReuseRunningServerResult {
+  message: string;
+  url: string;
+}
+
 // Redline runs one shared server holding many documents. When `start <file>` is
 // run and a server is ALREADY running, reuse it: open the file on it and return
-// the URL to print, rather than binding a second server. Returns null to start
-// fresh. Reuse is skipped when no file is given (a bare `start`/`dev` always
-// boots its own server) or when --port pins a specific instance (use that to run
-// a separate server). The candidate server's /api/health is probed first so a
-// stale registry entry (pid alive but not actually serving) doesn't misroute.
+// the URL to print, rather than binding a second server. Bare `start` also
+// reuses a server already running on the requested port. Returns null to start
+// fresh. Document reuse is skipped when --port pins a specific instance (use
+// that to run a separate server). The candidate server's /api/health is probed
+// first so a stale registry entry (pid alive but not actually serving) doesn't
+// misroute.
 export async function reuseRunningServer(
   options: ServerOptions,
   deps: { serversDir?: string; fetchImpl?: typeof fetch } = {},
-): Promise<string | null> {
-  if (!options.documentPath || options.portExplicit) return null;
+): Promise<ReuseRunningServerResult | null> {
   const serversDir = deps.serversDir ?? SERVERS_DIR;
   const fetchImpl = deps.fetchImpl ?? fetch;
+
+  if (!options.documentPath) {
+    for (const record of readServerRecords(serversDir)) {
+      if (!serverRecordUsesPort(record.url, options.port)) continue;
+      try {
+        const health = await fetchImpl(`${record.url}api/health`, { signal: AbortSignal.timeout(500) });
+        if (!health.ok) continue;
+        return {
+          url: record.url,
+          message: `Redline is already running (pid ${record.pid}).\nURL: ${record.url}`,
+        };
+      } catch {
+        // Unreachable or errored — try the next registered server.
+      }
+    }
+    return null;
+  }
+
+  if (options.portExplicit) return null;
 
   for (const record of readServerRecords(serversDir)) {
     try {
@@ -550,13 +575,15 @@ export async function reuseRunningServer(
       });
       if (!opened.ok) continue;
       const info = (await opened.json()) as { docId?: string };
-      const url = info.docId ? `${record.url}?doc=${info.docId}` : record.url;
-      return (
-        `Redline is already running (pid ${record.pid}); opened ${options.documentPath} on the existing server.\n` +
-        `URL: ${url}\n` +
-        `To start a fresh Redline server instead, pass an explicit port, for example:\n` +
-        `  bun run start ${options.documentPath} --port ${options.port + 1}`
-      );
+      const url = info.docId ? `${record.url}?doc=${encodeURIComponent(info.docId)}` : record.url;
+      return {
+        url,
+        message:
+          `Redline is already running (pid ${record.pid}); opened ${options.documentPath} on the existing server.\n` +
+          `URL: ${url}\n` +
+          `To start a fresh Redline server instead, pass an explicit port, for example:\n` +
+          `  bun run start ${options.documentPath} --port ${options.port + 1}`,
+      };
     } catch {
       // Unreachable or errored — try the next registered server.
     }
@@ -564,9 +591,20 @@ export async function reuseRunningServer(
   return null;
 }
 
-export function startServer(options: ServerOptions): void {
+function serverRecordUsesPort(url: string, port: number): boolean {
+  try {
+    const parsed = new URL(url);
+    const parsedPort = parsed.port ? Number.parseInt(parsed.port, 10) : parsed.protocol === "https:" ? 443 : 80;
+    return parsedPort === port;
+  } catch {
+    return url.includes(`:${port}/`);
+  }
+}
+
+export function startServer(options: ServerOptions, deps: { openBrowser?: OpenBrowser } = {}): void {
   let serverUrl = "";
   const manager = new SessionManager(() => syncRegistry());
+  const openBrowser = deps.openBrowser ?? openBrowserTab;
 
   function syncRegistry(): void {
     if (!serverUrl) return;
@@ -598,6 +636,11 @@ export function startServer(options: ServerOptions): void {
       console.error(`Port ${options.port} is already in use.`);
       if (here) {
         console.error(`A Redline server is already running there: ${here.url} (pid ${here.pid}).`);
+        const existingDoc = options.documentPath
+          ? here.docs.find((doc) => doc.path === options.documentPath)
+          : undefined;
+        const existingUrl = existingDoc ? `${here.url}?doc=${encodeURIComponent(existingDoc.docId)}` : here.url;
+        openBrowserBestEffort(existingUrl, openBrowser);
         console.error(`Open that URL, or open a file on it with: redline <file>`);
       } else {
         console.error(`Another process is using it. Start Redline on a different port:`);
@@ -635,17 +678,20 @@ export function startServer(options: ServerOptions): void {
   });
   manager.startWatching();
 
+  let browserUrl = server.url.toString();
   if (options.documentPath) {
     try {
       const { session } = manager.openOrGet(options.documentPath);
       console.log(`Redline opened ${session.path} as ${session.docId}`);
+      browserUrl = `${server.url}?doc=${encodeURIComponent(session.docId)}`;
     } catch (error) {
       console.warn(`Could not open ${options.documentPath}: ${error instanceof Error ? error.message : error}`);
     }
   } else {
     console.log("Redline started with no document open — choose a file from the browser.");
   }
-  console.log(`Open ${server.url}`);
+  console.log(`Open ${browserUrl}`);
+  openBrowserBestEffort(browserUrl, openBrowser);
   console.log(`Server registry: ${serverRecordPath(SERVERS_DIR, process.pid)}`);
 }
 
@@ -665,12 +711,29 @@ export async function runServerCli(args: string[]): Promise<void> {
   const options = parseArgs(args);
   const reused = await reuseRunningServer(options);
   if (reused) {
-    console.log(reused);
+    openBrowserBestEffort(reused.url, openBrowserTab);
+    console.log(reused.message);
     process.exit(0);
   } else {
     await ensureClientBuilt();
     startServer(options);
   }
+}
+
+function openBrowserBestEffort(url: string, openBrowser: OpenBrowser): void {
+  try {
+    const result = openBrowser(url);
+    if (result && typeof (result as Promise<void>).catch === "function") {
+      void (result as Promise<void>).catch((error) => warnOpenFailure(url, error));
+    }
+  } catch (error) {
+    warnOpenFailure(url, error);
+  }
+}
+
+function warnOpenFailure(url: string, error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error);
+  console.warn(`Could not open browser for ${url}: ${message}`);
 }
 
 if (import.meta.main) {
@@ -704,7 +767,7 @@ function parseArgs(args: string[]): ServerOptions {
         [
           "Usage: bun run start [document.html] [--port 7331] [--host 127.0.0.1]",
           "",
-          "With a file, opens it for review and prints a localhost URL. If a Redline",
+          "With a file, opens it for review in the browser and prints a localhost URL. If a Redline",
           "server is already running, the file is opened on THAT server (one shared",
           "server holds many documents); pass --port to run a separate server instead.",
         ].join("\n"),

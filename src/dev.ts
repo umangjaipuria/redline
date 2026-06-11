@@ -29,6 +29,7 @@ startServer(Bun.argv.slice(2));
 function startServer(args: string[]): void {
   server = spawn("bun", ["--watch", serverEntry, ...args], {
     cwd: repoRoot,
+    env: { ...process.env, REDLINE_NO_BROWSER: "1" },
     stdio: "inherit",
   });
   server.on("exit", (code, signal) => {

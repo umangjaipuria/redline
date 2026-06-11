@@ -101,6 +101,65 @@ describe("direct mode (no server)", () => {
     const res = await runCli(["servers"], deps());
     expect(res.output).toContain("No Redline servers");
   });
+
+  test("redline <file> starts a server and opens the document URL", async () => {
+    const opened: string[] = [];
+    const res = await runCli([file], deps({
+      openBrowser: (url) => {
+        opened.push(url);
+      },
+      startServer: async (openedFile) => ({
+        url: "http://server.local/",
+        pid: process.pid,
+        startedAt: new Date().toISOString(),
+        docs: [{ docId: "doc_cli", path: path.resolve(openedFile!) }],
+      }),
+    }));
+    expect(res.code).toBe(0);
+    expect(res.output).toContain(`Redline is serving ${file}`);
+    expect(res.output).toContain("http://server.local/?doc=doc_cli");
+    expect(opened).toEqual(["http://server.local/?doc=doc_cli"]);
+  });
+
+  test("bare redline opens an existing server URL", async () => {
+    writeServerRecord(serversDir, {
+      url: "http://server.local/",
+      pid: process.pid,
+      startedAt: new Date().toISOString(),
+      docs: [],
+    });
+    const opened: string[] = [];
+    const res = await runCli([], deps({
+      openBrowser: (url) => {
+        opened.push(url);
+      },
+      startServer: async () => {
+        throw new Error("should reuse the registered server");
+      },
+    }));
+    expect(res.code).toBe(0);
+    expect(res.output).toContain("Redline is serving");
+    expect(res.output).toContain("http://server.local/");
+    expect(opened).toEqual(["http://server.local/"]);
+  });
+
+  test("bare redline starts and opens a server when none is running", async () => {
+    const opened: string[] = [];
+    const res = await runCli([], deps({
+      openBrowser: (url) => {
+        opened.push(url);
+      },
+      startServer: async () => ({
+        url: "http://fresh.local/",
+        pid: process.pid,
+        startedAt: new Date().toISOString(),
+        docs: [],
+      }),
+    }));
+    expect(res.code).toBe(0);
+    expect(res.output).toContain("http://fresh.local/");
+    expect(opened).toEqual(["http://fresh.local/"]);
+  });
 });
 
 describe("registry routing (live server)", () => {
