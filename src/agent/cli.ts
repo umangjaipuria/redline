@@ -23,6 +23,7 @@ import {
 } from "../app";
 import { expandPath } from "../server/files";
 import { openBrowserTab, type OpenBrowser } from "../server/browser";
+import { runServerCli } from "../server/server";
 import {
   SERVERS_DIR,
   findServerForPath,
@@ -64,6 +65,8 @@ export async function runCli(argv: string[], overrides: Partial<CliDeps> = {}): 
   }
 }
 
+// NOTE: every command case here must also appear in AGENT_COMMANDS below, or the
+// compiled binary's runStandaloneCli will route it to the server branch instead.
 async function dispatch(command: string | undefined, args: string[], deps: CliDeps): Promise<string> {
   switch (command) {
     case undefined:
@@ -433,12 +436,34 @@ async function sendJson(deps: CliDeps, method: string, url: string, body?: unkno
 }
 
 // Start a detached server process and wait for it to register the document.
+// Dev: run the server entry through `bun`. The compiled binary has no `bun` on
+// PATH and no server.ts on disk, so it re-execs itself instead (see spawnSelfServer).
 async function spawnServer(file: string | undefined, deps: CliDeps): Promise<ServerRecord> {
-  const child = spawn("bun", file ? [serverEntry, file] : [serverEntry], {
+  const child = spawn("bun", file ? [serverEntry, file] : [serverEntry], detachedServerOptions());
+  return waitForServerRegistration(child, file, deps);
+}
+
+// Compiled-binary spawner: re-exec this executable with just the document path so
+// it takes the server branch of runStandaloneCli. process.execPath is the redline
+// binary here, not bun, and the server graph is embedded — no disk lookup.
+async function spawnSelfServer(file: string | undefined, deps: CliDeps): Promise<ServerRecord> {
+  const child = spawn(process.execPath, file ? [file] : [], detachedServerOptions());
+  return waitForServerRegistration(child, file, deps);
+}
+
+function detachedServerOptions() {
+  return {
     detached: true,
     env: { ...process.env, REDLINE_NO_BROWSER: "1" },
-    stdio: "ignore",
-  });
+    stdio: "ignore" as const,
+  };
+}
+
+async function waitForServerRegistration(
+  child: ReturnType<typeof spawn>,
+  file: string | undefined,
+  deps: CliDeps,
+): Promise<ServerRecord> {
   child.unref();
 
   const canonical = file ? path.resolve(file) : undefined;
@@ -533,6 +558,58 @@ Comment writes:
 Anchor writes & batch:
   redline reanchor <file> <thread-id> --quote "<new text>" [--occurrence N]
   redline apply <file> <payload.json>  One atomic batch of comment/anchor ops.`;
+}
+
+// Subcommands handled by the agent CLI. Everything else (bare invocation,
+// `redline <file>`, and server flags like --port/--host) is the server's job.
+// Keep this in sync with the `dispatch` switch above: a command added there but
+// omitted here would route to the server instead in the compiled binary.
+const AGENT_COMMANDS = new Set([
+  "-h",
+  "--help",
+  "servers",
+  "close",
+  "docid",
+  "comments",
+  "anchors",
+  "thread",
+  "info",
+  "comment",
+  "reply",
+  "edit-message",
+  "delete-reply",
+  "delete-thread",
+  "reanchor",
+  "apply",
+]);
+
+export function isAgentCommand(command: string | undefined): boolean {
+  return command !== undefined && AGENT_COMMANDS.has(command);
+}
+
+// Entry point for the compiled single binary, which bundles BOTH the agent CLI
+// and the server. Agent subcommands run here (spawning a server by re-execing the
+// binary when one is needed); all other invocations launch/serve via runServerCli.
+export async function runStandaloneCli(argv: string[]): Promise<void> {
+  const [command] = argv;
+  if (isAgentCommand(command)) {
+    const result = await runCli(argv, { startServer: spawnSelfServer });
+    if (result.code === 0) {
+      if (result.output) console.log(result.output);
+    } else {
+      console.error(result.output);
+    }
+    process.exit(result.code);
+  }
+  // The server branch can throw synchronously (e.g. parseArgs on a bad flag or
+  // port). Surface a clean message instead of letting the minified binary print
+  // an uncaught code-frame of its own bundle.
+  try {
+    await runServerCli(argv);
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  }
 }
 
 if (import.meta.main) {

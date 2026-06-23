@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { runCli, type CliDeps } from "./cli";
+import { runCli, isAgentCommand, type CliDeps } from "./cli";
 import { createRequestHandler } from "../server/server";
 import { SessionManager } from "../server/sessions";
 import { writeServerRecord } from "../server/registry";
@@ -202,5 +202,19 @@ describe("registry routing (live server)", () => {
     expect(state.threads).toHaveLength(1);
     expect(state.threads[0].author).toBe("Codex");
     manager.closeAll();
+  });
+});
+
+describe("standalone binary dispatch", () => {
+  test("agent subcommands route to the agent CLI", () => {
+    for (const cmd of ["reply", "comment", "comments", "thread", "delete-thread", "apply", "--help"]) {
+      expect(isAgentCommand(cmd)).toBe(true);
+    }
+  });
+
+  test("bare invocation, file paths, and server flags route to the server", () => {
+    for (const cmd of [undefined, "doc.html", "--port", "--host", "-p"]) {
+      expect(isAgentCommand(cmd)).toBe(false);
+    }
   });
 });

@@ -56,6 +56,7 @@ function collectFiles(dir: string): string[] {
 
 function writeEntry(assets: Asset[]): void {
   const serverImport = importPath(path.relative(scratchDir, path.join(repoRoot, "src/server/server.ts")));
+  const cliImport = importPath(path.relative(scratchDir, path.join(repoRoot, "src/agent/cli.ts")));
   const imports = assets
     .map((asset, index) => `import asset${index} from ${JSON.stringify(importPath(path.relative(scratchDir, asset.file)))} with { type: "file" };`)
     .join("\n");
@@ -66,14 +67,15 @@ function writeEntry(assets: Asset[]): void {
   fs.writeFileSync(
     entryPath,
     [
-      `import { runServerCli, setEmbeddedStaticAssets } from ${JSON.stringify(serverImport)};`,
+      `import { setEmbeddedStaticAssets } from ${JSON.stringify(serverImport)};`,
+      `import { runStandaloneCli } from ${JSON.stringify(cliImport)};`,
       imports,
       "",
       "setEmbeddedStaticAssets([",
       manifest,
       "]);",
       "",
-      "await runServerCli(Bun.argv.slice(2));",
+      "await runStandaloneCli(Bun.argv.slice(2));",
       "",
     ].join("\n"),
     "utf8",
