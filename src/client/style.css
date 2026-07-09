@@ -491,11 +491,27 @@ textarea:focus {
   margin: 5px 0 0; white-space: pre-wrap; overflow-wrap: anywhere;
   line-height: 1.5; font-size: 13.5px; color: var(--ink);
 }
+/* Inline markdown in comment bodies. Nothing here may add a line box: a comment
+   is a margin note, and vertical space in the rail is the scarce resource. */
+.message-body code {
+  padding: 0.1em 0.32em; border-radius: 4px;
+  background: var(--paper-deep);
+  font-family: var(--font-mono); font-size: 0.86em;
+}
+.message-body a {
+  color: var(--red-deep);
+  text-decoration: underline; text-underline-offset: 2px;
+  text-decoration-color: var(--red-line);
+}
+.message-body a:hover { text-decoration-color: currentColor; }
+.message-body del { color: var(--ink-faint); }
 .message-meta {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
   color: var(--ink-soft); font-size: 12px;
 }
-.message-meta > span { font-weight: 700; color: var(--ink); }
+/* The author name is the eye's landmark for where one message ends and the next
+   begins. Bold ink would tie with bold body text, so it carries the red instead. */
+.message-meta > span { font-weight: 700; color: var(--red); }
 .message-meta time { font-family: var(--font-mono); font-size: 11px; color: var(--ink-faint); }
 .message-meta-actions { display: flex; align-items: center; gap: 6px; flex: none; }
 

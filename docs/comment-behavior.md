@@ -161,3 +161,15 @@
 159. The document chooser should not auto-open a document unless a specific document is requested.
 160. Cross-origin browser requests to the local review service should be rejected.
 161. Unsupported file types should be rejected for review.
+162. Comment message bodies should render inline markdown: bold, italic, strikethrough, inline code, and links.
+163. Comment markdown should be inline only; block syntax such as headings, lists, blockquotes, tables, and fenced code should render as literal text.
+164. Comment bodies should be stored as raw markdown, and editing a message should show that raw markdown.
+165. Rendering a comment body should never let the body introduce markup of its own.
+166. Comment links should be limited to http, https, and mailto destinations; any other destination should render as literal text.
+167. Comment links should open outside the review app without granting the opened page access to it.
+168. Bare http and https URLs should be linked without requiring link syntax.
+169. Trailing sentence punctuation should not be captured into a bare URL.
+170. An underscore inside a word should not start emphasis.
+171. Text inside inline code should not be interpreted as markdown.
+172. A markdown delimiter with no valid match should render as literal text.
+173. An oversized comment body should render as plain text rather than being parsed.

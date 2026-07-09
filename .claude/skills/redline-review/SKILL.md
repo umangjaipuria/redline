@@ -106,6 +106,12 @@ redline delete-thread <file> <thread-id>
 
 `delete-thread` removes the thread from the state block (this is what was formerly "resolve"; there is no separate kept-resolved state). Only delete a reply by a message id **after** the first message — the first message is the original comment; to remove it, delete the whole thread. Delete threads only when the work is done or the user asks.
 
+### Formatting a comment body
+
+Bodies render as **inline** markdown: `**bold**`, `*italic*`, `` `code` ``, `~~strikethrough~~`, `[text](https://url)`, and bare `https://` URLs (only `http`, `https`, and `mailto` destinations link; anything else stays literal). Reach for backticks around identifiers, paths, and exact strings.
+
+Block syntax does **not** render — headings, lists, blockquotes, and fenced code all come out as literal text. This is intentional: comments are margin notes, and a comment long enough to need a list belongs in the document, not the rail. Bodies are stored raw, so `comments` and `thread` print exactly what you wrote.
+
 ## Anchor Writes & Batch
 
 Re-point one comment when reconcile orphaned it or matched with low confidence (state block only):

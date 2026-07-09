@@ -60,6 +60,8 @@ Enter Redline — a local app that opens an agent-written HTML document in your 
 
 5. **Leave comments.** Select text in the rendered document, click `Comment` (or press `Cmd+Shift+M`), and write your comment. Reply to threads, edit your own messages, or delete a thread once it's handled. In the top bar, set your author name so comments are attributed to you, and show or hide the comments rail. You're the reviewer here — your agent owns the document's text and makes the actual edits; your comments are saved inside the same HTML file.
 
+   Comments take inline markdown — `**bold**`, `*italic*`, `` `code` ``, `~~strikethrough~~`, `[links](https://example.com)`, and bare URLs. Headings, lists, and code blocks stay literal on purpose: a comment is a margin note, and the rail's scarce resource is vertical space.
+
 6. **Ask your agent to review the comments.** Tell Claude (or whichever agent wrote the doc) to review the open comments using the **redline-review** skill. It reads the threads, revises the document, replies to each thread with what changed, and deletes the threads that are fully resolved. The skill tells the agent how to find the running Redline instance on its own; if it can't, just give it the localhost URL the server printed.
 
 7. **Iterate.** Agent edits show up live in the open browser. Read the replies, leave new comments, and go again until the document is right. The agent doesn't watch for new comments on its own, so each time you finish a round of comments, tell it to review them again.

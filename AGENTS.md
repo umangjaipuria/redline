@@ -89,6 +89,14 @@ The `apply` payload batches ops and has **no content field** (Redline never writ
 
 If you rewrite the whole file, carry the `#redline-state` block over — dropping it loses the comments. Thread ids match `^thread_[A-Za-z0-9_-]{1,128}$`. Inside the block, `<` is escaped as `<`.
 
+## Comment Formatting
+
+Message bodies render as **inline** markdown in the browser: `**bold**`, `*italic*`, `` `code` ``, `~~strikethrough~~`, `[text](https://url)`, and bare `https://` URLs. Use `` `backticks` `` for identifiers and file paths — that is what the syntax is for here.
+
+Block syntax is deliberately not rendered. A `#` heading, a `-` list, a `>` quote, or a fenced code block comes out as literal text, because a comment is a margin note and vertical space in the rail is scarce. If a comment needs a list, it needs to be shorter. Bodies are stored raw, so what you write is what `comments` and `thread` print back.
+
+Only `http`, `https`, and `mailto` links render; any other destination stays literal text.
+
 ## Run It
 
 ```bash

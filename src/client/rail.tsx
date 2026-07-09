@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { AnchorStatus, Message, Thread } from "../core";
 import type { DocumentStateResponse, SelectorInput } from "../shared";
+import { MarkdownText } from "./markdown";
 
 interface RailProps {
   state: DocumentStateResponse;
@@ -273,7 +274,7 @@ function MessageRow(props: {
           </div>
         </form>
       ) : (
-        <p class="message-body">{message.body}</p>
+        <p class="message-body"><MarkdownText text={message.body} /></p>
       )}
     </div>
   );

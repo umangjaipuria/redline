@@ -76,6 +76,55 @@ test("paints embedded anchors and activates the matching rail card from an ifram
   }
 });
 
+test("renders inline markdown in a comment body without opening an html or href injection", async ({ page }) => {
+  const body = [
+    "**bold** and *italic* and `code()` and ~~gone~~",
+    "[docs](https://example.com) and https://bare.example.com",
+    "[trap](javascript:alert(1)) and <script>alert(2)</script>",
+  ].join(" ");
+
+  const app = await startRedline(
+    page,
+    htmlFixture({
+      body: `<main><p>Intro text before unique highlight target continues after for the browser.</p></main>`,
+      threads: [threadFixture({
+        id: "thread_md",
+        body,
+        quote: "unique highlight target",
+        prefix: "Intro text before ",
+        suffix: " continues after",
+        posStart: 18,
+        posEnd: 41,
+      })],
+    }),
+  );
+  try {
+    await openDocument(page, app);
+    const card = page.locator('.thread-card[data-thread-id="thread_md"] .message-body');
+    await expect(card).toBeVisible();
+
+    await expect(card.locator("strong")).toHaveText("bold");
+    await expect(card.locator("em")).toHaveText("italic");
+    await expect(card.locator("code")).toHaveText("code()");
+    await expect(card.locator("del")).toHaveText("gone");
+
+    const link = card.locator('a[href="https://example.com"]');
+    await expect(link).toHaveText("docs");
+    await expect(link).toHaveAttribute("target", "_blank");
+    await expect(link).toHaveAttribute("rel", /noopener/);
+    await expect(card.locator('a[href="https://bare.example.com"]')).toHaveCount(1);
+
+    // The two hostile constructs stay inert: no executable href, and the raw tag
+    // is text rather than an element.
+    await expect(card.locator('a[href^="javascript:"]')).toHaveCount(0);
+    await expect(card.locator("script")).toHaveCount(0);
+    await expect(card).toContainText("[trap](javascript:alert(1))");
+    await expect(card).toContainText("<script>alert(2)</script>");
+  } finally {
+    await app.stop();
+  }
+});
+
 test("creates a persisted comment from a real iframe text selection and clears the selection", async ({ page }) => {
   const app = await startRedline(
     page,
