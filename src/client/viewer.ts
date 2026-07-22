@@ -521,19 +521,27 @@ const HIGHLIGHT_STYLE = `<style>
   ::selection { background: rgba(196, 54, 29, 0.25); }
 </style>`;
 
-// A strict CSP for the reviewed document, layered on top of the iframe sandbox
-// (which already blocks scripts/forms/popups/top-navigation). It forbids ALL
-// remote resource loads — images, styles, fonts, media resolve only from THIS
-// document's own asset route (an absolute, path-scoped source, not the broad
-// 'self') or inline/data/blob. No script runs, nothing beacons out, nothing
-// navigates.
+// Google Fonts is served from two hosts: the stylesheet (@font-face rules) comes
+// from fonts.googleapis.com and the font files it references from fonts.gstatic.com.
+// Both must be allow-listed — the CSS host under style-src, the file host under
+// font-src — or the font silently falls back.
+const GOOGLE_FONTS_CSS = "https://fonts.googleapis.com";
+const GOOGLE_FONTS_FILES = "https://fonts.gstatic.com";
+
+// CSP for the reviewed document, layered on top of the iframe sandbox (which
+// already blocks scripts/forms/popups/top-navigation). Presentational remote
+// resources are allowed — external images (any https host) and Google Fonts —
+// but ACTIVE code is not: script-src stays 'none' so no external (or inline)
+// JavaScript ever runs, and object/frame/form are all forbidden. Nothing the
+// document loads can execute or navigate; the loosened directives only fetch
+// pixels, fonts, and stylesheets.
 function buildCsp(assetSource: string): string {
   const policy = [
     `default-src 'none'`,
-    `img-src ${assetSource} data: blob:`,
-    `media-src ${assetSource} data: blob:`,
-    `style-src ${assetSource} 'unsafe-inline'`,
-    `font-src ${assetSource} data:`,
+    `img-src ${assetSource} data: blob: https:`,
+    `media-src ${assetSource} data: blob: https:`,
+    `style-src ${assetSource} 'unsafe-inline' ${GOOGLE_FONTS_CSS}`,
+    `font-src ${assetSource} data: ${GOOGLE_FONTS_FILES}`,
     `base-uri ${assetSource}`, // permits exactly the <base> we inject
     `form-action 'none'`,
     `object-src 'none'`,

@@ -62,6 +62,18 @@ describe("injectBase reconstruction", () => {
     expect(out).not.toContain("img-src 'self'");
     expect(out).toContain("script-src 'none'");
   });
+
+  test("CSP allows external images and Google Fonts but never scripts", () => {
+    const out = injectBase(`<html><head></head><body></body></html>`, BASE);
+    // External images are permitted (any https host).
+    expect(out).toMatch(/img-src [^;]*\bhttps:/);
+    // Google Fonts: stylesheet host under style-src, file host under font-src.
+    expect(out).toMatch(/style-src [^;]*https:\/\/fonts\.googleapis\.com/);
+    expect(out).toMatch(/font-src [^;]*https:\/\/fonts\.gstatic\.com/);
+    // Active code stays blocked.
+    expect(out).toContain("script-src 'none'");
+    expect(out).toContain("object-src 'none'");
+  });
 });
 
 describe("localFragmentFromHref", () => {
