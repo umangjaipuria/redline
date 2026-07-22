@@ -6,6 +6,7 @@ import {
   agentThread,
   appendReply,
   applyAgentUpdate,
+  buildView,
   createComment,
   deleteReply,
   deleteThread,
@@ -13,6 +14,7 @@ import {
   listAnchors,
   reanchor,
   readDocument,
+  versionFor,
   ConflictError,
   ValidationError,
   type DocumentView,
@@ -41,7 +43,6 @@ const publicDir = path.resolve(__dirname, "../../public");
 // The bundled how-it-works document, offered as an in-app onboarding doc from the
 // landing page. Absent in some packaged builds — the endpoint reports null then.
 const howtoPath = path.resolve(__dirname, "../../docs/howto.html");
-const encoder = new TextEncoder();
 let embeddedStaticAssets = new Map<string, Blob>();
 
 export interface ServerHandlerContext {
@@ -104,10 +105,6 @@ async function handleRequest(request: Request, ctx: ServerHandlerContext): Promi
     return json(ctx.manager.info(session));
   }
 
-  if (pathname === "/api/events" && request.method === "GET") {
-    return serverEventStream(ctx.manager);
-  }
-
   // --- document-scoped routes ---------------------------------------------
   const docMatch = pathname.match(/^\/api\/docs\/([^/]+)(?:\/(.*))?$/);
   if (docMatch) {
@@ -164,16 +161,50 @@ async function handleDocScoped(
   if (!session) return unknownDoc();
   if (!isDocId(docId)) return unknownDoc();
 
+  try {
+    return await routeDocScoped(request, manager, session, rest);
+  } catch (error) {
+    // A write conflict carries the current on-disk view. Serialize it as a full
+    // DocumentStateResponse (with docId + startedAt) so the client can rebase — a
+    // raw DocumentView would be missing docId and break viewer.load / asset URLs.
+    if (error instanceof ConflictError) {
+      return json({ error: error.message, current: stateResponse(session, error.current) }, 409);
+    }
+    throw error;
+  }
+}
+
+async function routeDocScoped(
+  request: Request,
+  manager: SessionManager,
+  session: DocumentSession,
+  rest: string,
+): Promise<Response> {
   if (rest === "" && request.method === "GET") {
     return json(manager.info(session));
   }
 
   if (rest === "state" && request.method === "GET") {
-    return json(stateResponse(session, readDocument(session.path)));
-  }
-
-  if (rest === "events" && request.method === "GET") {
-    return docEventStream(manager, session);
+    // Conditional GET: the client sends If-None-Match with the version it last
+    // saw. `version` is a content hash, so hashing the current bytes (cheap) is
+    // enough to answer 304 without the far-more-expensive render in buildView.
+    // This keeps frequent polling of an unchanged document nearly free.
+    let content: string;
+    try {
+      content = fs.readFileSync(session.path, "utf8");
+    } catch {
+      // The session still exists, so a read failure here is transient (an editor's
+      // atomic-rename gap, a permissions blip). Return a retryable 503 rather than a
+      // 404 — the client's 404 path means "doc gone / re-resolve", and only the
+      // watcher's confirmed session removal should trigger that.
+      return json({ error: "Document temporarily unavailable; retry." }, 503);
+    }
+    const version = versionFor(content);
+    if (request.headers.get("if-none-match") === etagFor(version)) {
+      return notModified(version);
+    }
+    const view = buildView(session.path, content);
+    return json(stateResponse(session, view), 200, { ETag: etagFor(version) });
   }
 
   if (rest.startsWith("assets/")) {
@@ -185,7 +216,7 @@ async function handleDocScoped(
     const body = await readJson<CreateCommentRequest>(request);
     if (typeof body.message !== "string") return json({ error: "message is required." }, 400);
     const view = createComment(session.path, body, { defaultAuthor: "User" });
-    return mutated(manager, session, view, "comment.created");
+    return mutated(manager, session, view);
   }
 
   const replyMatch = rest.match(/^comments\/([^/]+)\/replies$/);
@@ -197,7 +228,7 @@ async function handleDocScoped(
       expectedVersion: typeof body.expectedVersion === "string" ? body.expectedVersion : undefined,
       defaultAuthor: "User",
     });
-    return mutated(manager, session, view, "comment.replied");
+    return mutated(manager, session, view);
   }
 
   const messageMatch = rest.match(/^comments\/([^/]+)\/messages\/([^/]+)$/);
@@ -211,7 +242,7 @@ async function handleDocScoped(
       body.body,
       { expectedVersion: typeof body.expectedVersion === "string" ? body.expectedVersion : undefined },
     );
-    return mutated(manager, session, view, "comment.edited");
+    return mutated(manager, session, view);
   }
 
   const deleteReplyMatch = rest.match(/^comments\/([^/]+)\/replies\/([^/]+)$/);
@@ -222,7 +253,7 @@ async function handleDocScoped(
       decodeURIComponent(deleteReplyMatch[2]!),
       { expectedVersion: expectedVersionFrom(request) },
     );
-    return mutated(manager, session, view, "comment.deleted");
+    return mutated(manager, session, view);
   }
 
   const deleteThreadMatch = rest.match(/^comments\/([^/]+)$/);
@@ -230,7 +261,7 @@ async function handleDocScoped(
     const view = deleteThread(session.path, decodeURIComponent(deleteThreadMatch[1]!), {
       expectedVersion: expectedVersionFrom(request),
     });
-    return mutated(manager, session, view, "comment.deleted");
+    return mutated(manager, session, view);
   }
 
   // Anchors
@@ -247,7 +278,7 @@ async function handleDocScoped(
       occurrence: typeof body.occurrence === "number" ? body.occurrence : undefined,
       expectedVersion: typeof body.expectedVersion === "string" ? body.expectedVersion : undefined,
     });
-    return mutated(manager, session, view, "anchors.reconciled");
+    return mutated(manager, session, view);
   }
 
   // Agent
@@ -269,7 +300,7 @@ async function handleDocScoped(
   if (rest === "agent/update" && request.method === "POST") {
     const body = await readJson<AgentUpdate>(request);
     const view = applyAgentUpdate(session.path, body, { defaultAuthor: "AI" });
-    return mutated(manager, session, view, "comment.created");
+    return mutated(manager, session, view);
   }
 
   return json({ error: "Not found." }, 404);
@@ -281,6 +312,7 @@ function stateResponse(session: DocumentSession, view: DocumentView): DocumentSt
     path: session.path,
     format: view.format,
     version: view.version,
+    startedAt: serverStartedAt,
     updatedAt: view.updatedAt,
     renderedHtml: view.renderedHtml,
     threads: view.threads,
@@ -292,15 +324,11 @@ function stateResponse(session: DocumentSession, view: DocumentView): DocumentSt
   return response;
 }
 
-// Record our own write and broadcast the event, then return the fresh state.
-function mutated(
-  manager: SessionManager,
-  session: DocumentSession,
-  view: DocumentView,
-  event: string,
-): Response {
-  manager.applyMutation(session, view, event);
-  return json(stateResponse(session, view));
+// Record our own write, then return the fresh state to the writer. Other clients
+// pick the change up on their next /state poll.
+function mutated(manager: SessionManager, session: DocumentSession, view: DocumentView): Response {
+  manager.applyMutation(session, view);
+  return json(stateResponse(session, view), 200, { ETag: etagFor(view.version) });
 }
 
 function expectedVersionFrom(request: Request): string | undefined {
@@ -321,56 +349,17 @@ function unknownDoc(): Response {
   return json({ error: "Unknown document — re-resolve it by path.", code: "unknown-doc" }, 404);
 }
 
-// --- SSE -----------------------------------------------------------------
-
-function docEventStream(manager: SessionManager, session: DocumentSession): Response {
-  let controllerRef: ReadableStreamDefaultController<Uint8Array> | null = null;
-  let heartbeat: ReturnType<typeof setInterval> | undefined;
-  const stream = new ReadableStream<Uint8Array>({
-    start(controller) {
-      controllerRef = controller;
-      manager.subscribeDoc(session, controller);
-      controller.enqueue(encoder.encode("event: connected\ndata: {}\n\n"));
-      heartbeat = setInterval(() => {
-        try {
-          controller.enqueue(encoder.encode(": keepalive\n\n"));
-        } catch {
-          clearInterval(heartbeat);
-        }
-      }, 25_000);
-      heartbeat.unref?.();
-    },
-    cancel() {
-      clearInterval(heartbeat);
-      if (controllerRef) manager.unsubscribeDoc(session, controllerRef);
-    },
-  });
-  return new Response(stream, { headers: sseHeaders() });
+// The document version (a content hash) doubles as the /state ETag, so a
+// conditional poll can be answered without rendering. Quoted per the HTTP spec.
+function etagFor(version: string): string {
+  return `"${version}"`;
 }
 
-function serverEventStream(manager: SessionManager): Response {
-  let controllerRef: ReadableStreamDefaultController<Uint8Array> | null = null;
-  let heartbeat: ReturnType<typeof setInterval> | undefined;
-  const stream = new ReadableStream<Uint8Array>({
-    start(controller) {
-      controllerRef = controller;
-      manager.subscribeServer(controller);
-      controller.enqueue(encoder.encode("event: connected\ndata: {}\n\n"));
-      heartbeat = setInterval(() => {
-        try {
-          controller.enqueue(encoder.encode(": keepalive\n\n"));
-        } catch {
-          clearInterval(heartbeat);
-        }
-      }, 25_000);
-      heartbeat.unref?.();
-    },
-    cancel() {
-      clearInterval(heartbeat);
-      if (controllerRef) manager.unsubscribeServer(controllerRef);
-    },
+function notModified(version: string): Response {
+  return new Response(null, {
+    status: 304,
+    headers: { ...corsHeaders(), ETag: etagFor(version), "Cache-Control": "no-store" },
   });
-  return new Response(stream, { headers: sseHeaders() });
 }
 
 // --- static + assets -----------------------------------------------------
@@ -423,8 +412,12 @@ function realInside(parent: string, child: string): boolean {
 // --- error mapping -------------------------------------------------------
 
 function errorResponse(error: unknown): Response {
+  // ConflictError is handled in handleDocScoped, where a session is in scope to
+  // serialize `current` as a full DocumentStateResponse. It must never reach here
+  // (this generic path has no session, so it could only emit a docId-less raw
+  // DocumentView) — surface it loudly rather than shipping a malformed 409.
   if (error instanceof ConflictError) {
-    return json({ error: error.message, current: error.current }, 409);
+    return json({ error: `Unexpected conflict without document context: ${error.message}` }, 500);
   }
   if (error instanceof SessionError || error instanceof FileBrowseError) {
     return json({ error: error.message }, error.status);
@@ -449,24 +442,16 @@ async function readJson<T>(request: Request): Promise<T> {
   }
 }
 
-function json(value: unknown, status = 200): Response {
+function json(value: unknown, status = 200, extraHeaders: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(value, null, 2), {
     status,
     headers: {
       ...corsHeaders(),
       "Content-Type": "application/json; charset=utf-8",
       "Cache-Control": "no-store",
+      ...extraHeaders,
     },
   });
-}
-
-function sseHeaders(): Record<string, string> {
-  return {
-    ...corsHeaders(),
-    "Content-Type": "text/event-stream",
-    "Cache-Control": "no-store",
-    Connection: "keep-alive",
-  };
 }
 
 function isLoopbackHost(host: string): boolean {

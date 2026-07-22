@@ -21,11 +21,12 @@ export class ApiError extends Error {
   }
 }
 
-async function send<T>(method: string, url: string, body?: unknown): Promise<T> {
+async function send<T>(method: string, url: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   const response = await fetch(url, {
     method,
     headers: body !== undefined ? { "Content-Type": "application/json" } : {},
     body: body !== undefined ? JSON.stringify(body) : undefined,
+    signal,
   });
   const text = await response.text();
   const parsed = text ? JSON.parse(text) : {};
@@ -41,10 +42,36 @@ export interface DocsList {
 }
 
 export const api = {
-  listDocs: () => send<DocsList>("GET", "/api/docs"),
-  openDoc: (path: string) => send<DocumentSessionInfo>("POST", "/api/docs", { path }),
+  listDocs: (signal?: AbortSignal) => send<DocsList>("GET", "/api/docs", undefined, signal),
+  openDoc: (path: string, signal?: AbortSignal) =>
+    send<DocumentSessionInfo>("POST", "/api/docs", { path }, signal),
   closeDoc: (docId: string) => send<{ closed: boolean }>("DELETE", `/api/docs/${docId}`),
-  state: (docId: string) => send<DocumentStateResponse>("GET", `/api/docs/${docId}/state`),
+  state: (docId: string, signal?: AbortSignal) =>
+    send<DocumentStateResponse>("GET", `/api/docs/${docId}/state`, undefined, signal),
+  // Conditional poll: sends If-None-Match with the version we hold; resolves to
+  // null when the server answers 304 (unchanged), so the caller repaints only on
+  // a real change. A 404 throws an ApiError the poller reads as "doc gone".
+  pollState: async (
+    docId: string,
+    knownVersion?: string,
+    signal?: AbortSignal,
+  ): Promise<DocumentStateResponse | null> => {
+    const response = await fetch(`/api/docs/${docId}/state`, {
+      headers: knownVersion ? { "If-None-Match": `"${knownVersion}"` } : {},
+      signal,
+    });
+    if (response.status === 304) return null;
+    const text = await response.text();
+    const parsed = text ? JSON.parse(text) : {};
+    if (!response.ok) {
+      throw new ApiError(parsed?.error ?? `Request failed (${response.status}).`, response.status, parsed?.current);
+    }
+    return parsed as DocumentStateResponse;
+  },
+  // Re-resolve a document by its (durable) path — used after a docId 404s to find
+  // the same file reopened under a fresh id. Throws ApiError(404) if not open.
+  resolveByPath: (path: string, signal?: AbortSignal) =>
+    send<DocumentSessionInfo>("GET", `/api/docs?path=${encodeURIComponent(path)}`, undefined, signal),
   listFiles: (dir: string) =>
     send<{ dir: string; parent: string | null; entries: FileEntry[] }>(
       "GET",

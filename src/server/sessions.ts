@@ -2,7 +2,10 @@
 // there is no module-level "current document". Sessions are keyed internally by
 // canonical absolute path (opening the same file twice returns the same session)
 // and addressed over the API by an opaque, ephemeral docId. Each session owns
-// its document's path, version, SSE subscribers, and external-change tracking.
+// its document's path, version, and external-change tracking. Clients learn about
+// changes by polling GET /state (conditional on version) — there is no push
+// channel; the server-side watcher below only keeps each session's tracked
+// version fresh and closes sessions whose file was deleted.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -10,8 +13,6 @@ import { flushReconciledHints, reconcileDocument, versionFor, type DocumentView 
 import { adapterForPath } from "../formats";
 import type { DocumentSessionInfo } from "../shared";
 import { generateDocId } from "./docid";
-
-type Controller = ReadableStreamDefaultController<Uint8Array>;
 
 export interface DocumentSession {
   docId: string;
@@ -32,8 +33,11 @@ export interface DocumentSession {
   // reconcile) so the next poll re-validates against disk rather than trusting a
   // signature that might have been captured across an interleaved external edit.
   lastStat: StatSignature | null;
+  // Consecutive watcher ticks the file has failed to stat. A single miss can be a
+  // transient atomic-rename gap (matching /state's retryable 503), so we require a
+  // few in a row before concluding the file is really gone and closing the session.
+  consecutiveMisses: number;
   pendingHealedHints?: PendingHealedHints;
-  subscribers: Set<Controller>;
 }
 
 interface PendingHealedHints {
@@ -48,8 +52,10 @@ interface StatSignature {
   ino: number; // changes when an atomic temp+rename swaps the file
 }
 
-const encoder = new TextEncoder();
 const DEFAULT_HEALED_HINT_FLUSH_QUIET_MS = 30_000;
+// Consecutive failed stats before a session is torn down as deleted (~a few
+// watcher ticks of grace for an atomic-rename gap).
+const MISS_THRESHOLD = 3;
 
 export interface SessionManagerOptions {
   healedHintFlushQuietMs?: number;
@@ -62,6 +68,10 @@ export interface SessionManagerOptions {
 function statSignature(filePath: string): StatSignature | null {
   try {
     const stat = fs.statSync(filePath);
+    // A non-regular file (e.g. the path replaced by a directory) can't be read, so
+    // treat it as "missing" — otherwise it would reset the miss counter every tick
+    // while every /state read fails, stranding the session on a permanent 503.
+    if (!stat.isFile()) return null;
     return { mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs, size: stat.size, ino: stat.ino };
   } catch {
     return null;
@@ -82,7 +92,6 @@ function sameStat(a: StatSignature | null, b: StatSignature | null): boolean {
 export class SessionManager {
   private readonly byDocId = new Map<string, DocumentSession>();
   private readonly byPath = new Map<string, string>(); // canonicalPath -> docId
-  private readonly serverSubscribers = new Set<Controller>();
   private poll?: ReturnType<typeof setInterval>;
   private readonly healedHintFlushQuietMs: number;
 
@@ -129,13 +138,12 @@ export class SessionManager {
       // null → the first poll re-validates against disk; an external edit could
       // interleave while opening. Cheap: one read.
       lastStat: null,
-      subscribers: new Set(),
+      consecutiveMisses: 0,
     };
     this.notePendingHeal(session, view, healed);
     this.byDocId.set(docId, session);
     this.byPath.set(canonical, docId);
     this.onDocsChanged();
-    this.broadcastServer("document.opened", { docId, path: canonical });
     return { session, opened: true };
   }
 
@@ -155,20 +163,10 @@ export class SessionManager {
   close(docId: string): boolean {
     const session = this.byDocId.get(docId);
     if (!session) return false;
-    this.flushPendingHeal(session, { broadcast: false });
-    this.broadcastDoc(session, "document.closed", { docId });
-    for (const controller of session.subscribers) {
-      try {
-        controller.close();
-      } catch {
-        // Already closed.
-      }
-    }
-    session.subscribers.clear();
+    this.flushPendingHeal(session);
     this.byDocId.delete(docId);
     this.byPath.delete(session.path);
     this.onDocsChanged();
-    this.broadcastServer("document.closed", { docId, path: session.path });
     return true;
   }
 
@@ -184,60 +182,16 @@ export class SessionManager {
     return out;
   }
 
-  // Record the result of one of our own writes so the poll loop doesn't mistake
-  // it for an external edit, and broadcast the mutation event.
-  applyMutation(session: DocumentSession, view: DocumentView, event: string): void {
+  // Record the result of one of our own writes so the watcher doesn't mistake it
+  // for an external edit. The fresh state travels back to the writer in the HTTP
+  // response; other clients pick it up on their next poll.
+  applyMutation(session: DocumentSession, view: DocumentView): void {
     updateSessionFromView(session, view);
     session.pendingHealedHints = undefined;
     // Don't trust a post-write stat: an external edit could have interleaved
     // between our write and here. Force the next poll to validate by hash.
     session.lastStat = null;
     session.lastActiveAt = Date.now();
-    this.broadcastDoc(session, event, {
-      docId: session.docId,
-      version: view.version,
-      summary: view.summary,
-    });
-  }
-
-  // --- SSE subscription ---------------------------------------------------
-
-  subscribeDoc(session: DocumentSession, controller: Controller): void {
-    session.subscribers.add(controller);
-  }
-
-  unsubscribeDoc(session: DocumentSession, controller: Controller): void {
-    session.subscribers.delete(controller);
-  }
-
-  subscribeServer(controller: Controller): void {
-    this.serverSubscribers.add(controller);
-  }
-
-  unsubscribeServer(controller: Controller): void {
-    this.serverSubscribers.delete(controller);
-  }
-
-  broadcastDoc(session: DocumentSession, event: string, data: unknown): void {
-    const payload = encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-    for (const controller of [...session.subscribers]) {
-      try {
-        controller.enqueue(payload);
-      } catch {
-        session.subscribers.delete(controller);
-      }
-    }
-  }
-
-  broadcastServer(event: string, data: unknown): void {
-    const payload = encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-    for (const controller of [...this.serverSubscribers]) {
-      try {
-        controller.enqueue(payload);
-      } catch {
-        this.serverSubscribers.delete(controller);
-      }
-    }
   }
 
   // --- external change watching -------------------------------------------
@@ -259,11 +213,16 @@ export class SessionManager {
       try {
         const stat = statSignature(session.path);
 
-        // Rename/delete: treat as external change, then close the session.
+        // Rename/delete: only conclude the file is gone after a few consecutive
+        // misses, so a transient atomic-rename gap doesn't tear down a live session
+        // (and trigger the client's doc-gone recovery) for a file that's about to
+        // reappear a tick later.
         if (stat === null) {
-          this.close(session.docId);
+          session.consecutiveMisses += 1;
+          if (session.consecutiveMisses >= MISS_THRESHOLD) this.close(session.docId);
           continue;
         }
+        session.consecutiveMisses = 0;
 
         // Cheap gate: an unchanged signature means the bytes are untouched, so we
         // skip the read + parse + render entirely. This is the common case every
@@ -287,8 +246,10 @@ export class SessionManager {
           continue;
         }
 
-        // External edit detected. Reconcile in memory and announce, but do not
-        // write healed hints back while an external editor may still be active.
+        // External edit detected. Reconcile in memory so the session's tracked
+        // version is fresh (clients see the change on their next /state poll),
+        // but do not write healed hints back while an external editor may still
+        // be active.
         const { view, healed } = reconcileDocument(session.path);
         updateSessionFromView(session, view);
         this.notePendingHeal(session, view, healed);
@@ -296,15 +257,6 @@ export class SessionManager {
         // trusting a signature that might have been captured across an
         // interleaved external edit.
         session.lastStat = null;
-        this.broadcastDoc(session, "external.changed", {
-          docId: session.docId,
-          version: view.version,
-        });
-        this.broadcastDoc(session, "anchors.reconciled", {
-          docId: session.docId,
-          version: view.version,
-          summary: summarizeAnchors(view),
-        });
       } catch {
         // Keep the server alive if an editor temporarily swaps the file on disk.
       }
@@ -331,34 +283,27 @@ export class SessionManager {
     const pending = session.pendingHealedHints;
     if (!pending) return false;
     if (now - pending.detectedAt < this.healedHintFlushQuietMs) return false;
-    this.flushPendingHeal(session, { broadcast: true });
+    this.flushPendingHeal(session);
     return true;
   }
 
-  private flushPendingHeal(session: DocumentSession, options: { broadcast: boolean }): void {
+  private flushPendingHeal(session: DocumentSession): void {
     const pending = session.pendingHealedHints;
     if (!pending) return;
 
     try {
-      const { view, healed } = flushReconciledHints(session.path, pending.version);
+      const { view } = flushReconciledHints(session.path, pending.version);
       updateSessionFromView(session, view);
       session.pendingHealedHints = undefined;
       // We just wrote (or verified a no-op); force the next poll to validate by
       // hash before caching a stat signature.
       session.lastStat = null;
-      if (options.broadcast && healed) {
-        this.broadcastDoc(session, "anchors.reconciled", {
-          docId: session.docId,
-          version: view.version,
-          summary: summarizeAnchors(view),
-        });
-      }
     } catch (error) {
       session.pendingHealedHints = undefined;
       session.lastStat = null;
       // A concurrent edit or malformed state just means this cache-like hint
       // flush was skipped. Do not advance lastKnownVersion here: if the file
-      // changed, the next watcher pass must still detect and broadcast it.
+      // changed, the next watcher pass must still detect it.
     }
   }
 }
@@ -368,22 +313,6 @@ function updateSessionFromView(session: DocumentSession, view: DocumentView): vo
   session.updatedAt = view.updatedAt;
   session.title = view.title;
   session.lastKnownVersion = view.version;
-}
-
-function summarizeAnchors(view: DocumentView): {
-  orphaned: number;
-  needsReview: number;
-  anchored: number;
-} {
-  let orphaned = 0;
-  let needsReview = 0;
-  let anchored = 0;
-  for (const anchor of view.anchors) {
-    if (anchor.state === "orphaned") orphaned += 1;
-    else if (anchor.state === "needs-review") needsReview += 1;
-    else anchored += 1;
-  }
-  return { orphaned, needsReview, anchored };
 }
 
 export class SessionError extends Error {

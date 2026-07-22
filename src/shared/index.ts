@@ -75,6 +75,11 @@ export interface DocumentStateResponse {
   path: string;
   format: string;
   version: string;
+  // The server's boot timestamp. A restart is already handled reactively (docIds
+  // are ephemeral across restarts, so the old id 404s and the client re-resolves
+  // by path), but exposing the boot id lets clients/tools detect a restart
+  // directly and is useful for diagnostics.
+  startedAt: string;
   updatedAt: string;
   title?: string;
   renderedHtml: string;
@@ -111,15 +116,3 @@ export interface ServerInfo {
   startedAt: string;
   docs: { docId: string; path: string }[];
 }
-
-export const SSE_EVENTS = [
-  "document.opened",
-  "document.closed",
-  "comment.created",
-  "comment.replied",
-  "comment.edited",
-  "comment.deleted",
-  "anchors.reconciled",
-  "external.changed",
-] as const;
-export type SseEvent = (typeof SSE_EVENTS)[number];

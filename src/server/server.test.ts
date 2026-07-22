@@ -127,6 +127,48 @@ describe("document-scoped state + comments", () => {
     expect(state.threads).toHaveLength(0);
   });
 
+  test("state carries an ETag and a boot id, and a matching If-None-Match yields 304", async () => {
+    const { docId } = await openDoc();
+    const res = await handler(req("GET", `/api/docs/${docId}/state`));
+    const state: DocumentStateResponse = await res.json();
+    const etag = res.headers.get("ETag");
+    expect(etag).toBe(`"${state.version}"`);
+    expect(state.startedAt).toBeTruthy();
+
+    // Poll again with the version we hold: unchanged document → 304, no body.
+    const conditional = new Request(`http://127.0.0.1/api/docs/${docId}/state`, {
+      headers: { "If-None-Match": etag! },
+    });
+    const notModified = await handler(conditional);
+    expect(notModified.status).toBe(304);
+    expect(await notModified.text()).toBe("");
+    expect(notModified.headers.get("ETag")).toBe(etag);
+
+    // After a write the version changes, so the stale If-None-Match no longer matches.
+    await handler(req("POST", `/api/docs/${docId}/comments`, { message: "x", quote: "new dashboard" }));
+    const afterWrite = await handler(conditional);
+    expect(afterWrite.status).toBe(200);
+  });
+
+  test("a transient read failure is a retryable 503 while the session lives; a confirmed removal is a 404", async () => {
+    const { docId } = await openDoc();
+    // Simulate the file being briefly unreadable (e.g. an atomic-rename gap). The
+    // session still exists, so this must be a retryable 503, never a spurious 404
+    // (which the client would read as "doc gone / re-resolve").
+    fs.rmSync(file);
+    const transient = await handler(req("GET", `/api/docs/${docId}/state`));
+    expect(transient.status).toBe(503);
+
+    // Once the watcher confirms the file is gone (a few consecutive missed stats,
+    // not one) it closes the session; only then does /state become a true 404.
+    manager.checkExternalChanges();
+    expect((await handler(req("GET", `/api/docs/${docId}/state`))).status).toBe(503); // still in grace
+    manager.checkExternalChanges();
+    manager.checkExternalChanges();
+    const gone = await handler(req("GET", `/api/docs/${docId}/state`));
+    expect(gone.status).toBe(404);
+  });
+
   test("create comment, reply, edit, delete-thread round-trip", async () => {
     const { docId } = await openDoc();
     let res = await handler(req("POST", `/api/docs/${docId}/comments`, {
@@ -167,7 +209,12 @@ describe("document-scoped state + comments", () => {
       expectedVersion: "stale",
     }));
     expect(res.status).toBe(409);
-    expect((await res.json()).current).toBeDefined();
+    // `current` must be a full DocumentStateResponse the client can rebase onto —
+    // a raw DocumentView would lack docId (breaking viewer.load / asset URLs).
+    const current = (await res.json()).current as DocumentStateResponse;
+    expect(current.docId).toBe(docId);
+    expect(current.startedAt).toBeTruthy();
+    expect(current.renderedHtml).toContain("Quarterly review");
   });
 
   test("malformed JSON body returns 400, not 500", async () => {
@@ -316,26 +363,6 @@ describe("multiple documents", () => {
     const again: DocumentSessionInfo = await (await handler(req("POST", "/api/docs", { path: file }))).json();
     expect(again.docId).toBe(a.docId);
     expect((await (await handler(req("GET", "/api/docs"))).json()).docs).toHaveLength(1);
-  });
-
-  test("the server-level stream announces opens and closes to the switcher", () => {
-    // Doc-scoped SSE can't announce a doc a client hasn't subscribed to yet, so
-    // the switcher learns about opens/closes from this server-level signal.
-    const events: string[] = [];
-    const controller = {
-      enqueue: (bytes: Uint8Array) => events.push(new TextDecoder().decode(bytes)),
-      close: () => {},
-    } as unknown as ReadableStreamDefaultController<Uint8Array>;
-    manager.subscribeServer(controller);
-
-    const { session } = manager.openOrGet(file);
-    manager.openOrGet(secondDoc());
-    manager.close(session.docId);
-
-    const opened = events.filter((e) => e.includes("document.opened")).length;
-    const closed = events.filter((e) => e.includes("document.closed")).length;
-    expect(opened).toBe(2);
-    expect(closed).toBe(1);
   });
 
   test("registryDocs reflects every open document for the registry file", () => {
@@ -491,27 +518,20 @@ describe("external change detection", () => {
       serverInfo: () => ({ url: "http://x", pid: 1, startedAt: "now", docs: [] }),
     });
     const { docId } = await openDoc();
-    const events: string[] = [];
-    const controller = {
-      enqueue: (bytes: Uint8Array) => events.push(new TextDecoder().decode(bytes)),
-      close: () => {},
-    } as unknown as ReadableStreamDefaultController<Uint8Array>;
-    manager.subscribeDoc(manager.get(docId)!, controller);
 
     await handler(req("POST", `/api/docs/${docId}/comments`, { message: "x", quote: "metrics are accurate" }));
-    events.length = 0;
     const firstEdit = fs.readFileSync(file, "utf8").replace("The team shipped", "The full team shipped");
     fs.writeFileSync(file, firstEdit, "utf8");
     manager.checkExternalChanges();
     expect(manager.get(docId)!.pendingHealedHints).toBeDefined();
-    events.length = 0;
 
     const secondEdit = fs.readFileSync(file, "utf8").replace("asked for more charts", "asked for more analytics charts");
     fs.writeFileSync(file, secondEdit, "utf8");
     manager.checkExternalChanges();
 
     expect(fs.readFileSync(file, "utf8")).toBe(secondEdit);
-    expect(events.some((event) => event.includes("external.changed"))).toBe(true);
+    // The newer external edit must win: the session's tracked version updates and
+    // /state reflects it (clients see it on their next poll).
     const state: DocumentStateResponse = await (await handler(req("GET", `/api/docs/${docId}/state`))).json();
     expect(state.renderedHtml).toContain("more analytics charts");
   });

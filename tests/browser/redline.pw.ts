@@ -177,15 +177,57 @@ test("updates the open browser when another client writes a comment through the 
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        message: "Arrived over SSE",
+        message: "Arrived via polling",
         author: "Codex",
         quote: "live update phrase",
       }),
     });
     expect(response.ok).toBe(true);
 
-    await expect(page.locator(".thread-card")).toContainText("Arrived over SSE");
+    // No push channel: the open tab picks the new comment up on its next poll of
+    // /state, so allow a couple of foreground poll intervals.
+    await expect(page.locator(".thread-card")).toContainText("Arrived via polling", { timeout: 10_000 });
     await expect(frame.locator(".redline-highlight")).toContainText("live update phrase");
+  } finally {
+    await app.stop();
+  }
+});
+
+test("switching documents through the chooser always renders the selected document", async ({ page }) => {
+  const app = await startRedline(page, htmlFixture({ body: "<main><p>Alpha document body</p></main>" }));
+  try {
+    // Open a second document on the same server.
+    const secondPath = path.join(path.dirname(app.filePath), "second.html");
+    await writeFile(secondPath, htmlFixture({ body: "<main><p>Bravo document body</p></main>" }), "utf8");
+    const opened = await fetch(`${app.origin}/api/docs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: secondPath }),
+    });
+    expect(opened.ok).toBe(true);
+
+    // Deep-link into the first document.
+    const frameA = await openDocument(page, app);
+    await expect(frameA.locator("body")).toContainText("Alpha document body");
+
+    // Chooser → second document: the correct body must render (activation crosses
+    // the render/rAF boundary — the regression this guards left it blank/stale).
+    await page.locator(".brand-home").click();
+    await expect(page.locator(".chooser-item")).toHaveCount(2);
+    await page.locator(".chooser-item", { hasText: "second.html" }).click();
+    await expect(page.locator(".document-name")).toHaveText("second.html");
+    const frameB = await documentFrame(page);
+    await expect(frameB.locator("body")).toContainText("Bravo document body");
+    await expect(frameB.locator("body")).not.toContainText("Alpha document body");
+
+    // Switch back to the first document; it must render its own content again.
+    await page.locator(".brand-home").click();
+    await expect(page.locator(".chooser-item")).toHaveCount(2);
+    await page.locator(".chooser-item", { hasText: "doc.html" }).click();
+    await expect(page.locator(".document-name")).toHaveText("doc.html");
+    const frameA2 = await documentFrame(page);
+    await expect(frameA2.locator("body")).toContainText("Alpha document body");
+    await expect(frameA2.locator("body")).not.toContainText("Bravo document body");
   } finally {
     await app.stop();
   }

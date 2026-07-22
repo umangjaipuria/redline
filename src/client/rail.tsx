@@ -14,10 +14,13 @@ interface RailProps {
   onDeselect: () => void;
   onManualScroll: () => void;
   onSelectThread: (id: string) => void;
-  onCreateComment: (text: string) => Promise<unknown>;
+  // These resolve to true when the write committed, false when it was dropped
+  // (e.g. the user navigated away mid-write). The editors keep the user's draft on
+  // a dropped write instead of clearing it.
+  onCreateComment: (text: string) => Promise<boolean>;
   onCancelComposer: () => void;
-  onReply: (threadId: string, text: string) => Promise<unknown>;
-  onEdit: (threadId: string, messageId: string, text: string) => Promise<unknown>;
+  onReply: (threadId: string, text: string) => Promise<boolean>;
+  onEdit: (threadId: string, messageId: string, text: string) => Promise<boolean>;
   onDeleteReply: (threadId: string, messageId: string) => Promise<unknown>;
   onDeleteThread: (threadId: string) => Promise<unknown>;
   onReanchor: (threadId: string) => Promise<unknown>;
@@ -76,7 +79,7 @@ function isScrollKey(key: string): boolean {
     key === "Home" || key === "End" || key === " ";
 }
 
-function Composer(props: { onCreate: (text: string) => Promise<unknown>; onCancel: () => void }) {
+function Composer(props: { onCreate: (text: string) => Promise<boolean>; onCancel: () => void }) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const ref = useRef<HTMLTextAreaElement | null>(null);
@@ -89,8 +92,7 @@ function Composer(props: { onCreate: (text: string) => Promise<unknown>; onCance
     if (!text.trim() || busy) return;
     setBusy(true);
     try {
-      await props.onCreate(text.trim());
-      setText("");
+      if (await props.onCreate(text.trim())) setText(""); // keep the draft if dropped
     } finally {
       setBusy(false);
     }
@@ -157,8 +159,9 @@ function ThreadCard(props: RailProps & { thread: Thread; status?: AnchorStatus }
           editing={editingId === message.id}
           onCancelEdit={() => setEditingId(null)}
           onEdit={async (text) => {
-            await props.onEdit(thread.id, message.id, text);
-            setEditingId(null);
+            const committed = await props.onEdit(thread.id, message.id, text);
+            if (committed) setEditingId(null); // else keep the editor open with the draft
+            return committed;
           }}
           onDelete={index === 0 ? undefined : () => props.onDeleteReply(thread.id, message.id)}
         />
@@ -207,8 +210,9 @@ function ThreadCard(props: RailProps & { thread: Thread; status?: AnchorStatus }
         <ReplyForm
           onCancel={() => setReplyOpen(false)}
           onReply={async (text) => {
-            await props.onReply(thread.id, text);
-            setReplyOpen(false);
+            const committed = await props.onReply(thread.id, text);
+            if (committed) setReplyOpen(false); // else keep the reply box open with the draft
+            return committed;
           }}
         />
       )}
@@ -280,7 +284,7 @@ function MessageRow(props: {
   );
 }
 
-function ReplyForm(props: { onReply: (text: string) => Promise<unknown>; onCancel: () => void }) {
+function ReplyForm(props: { onReply: (text: string) => Promise<boolean>; onCancel: () => void }) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const ref = useRef<HTMLTextAreaElement | null>(null);
@@ -289,7 +293,11 @@ function ReplyForm(props: { onReply: (text: string) => Promise<unknown>; onCance
   const submit = async () => {
     if (!text.trim() || busy) return;
     setBusy(true);
-    try { await props.onReply(text.trim()); setText(""); } finally { setBusy(false); }
+    try {
+      if (await props.onReply(text.trim())) setText(""); // keep the draft if dropped
+    } finally {
+      setBusy(false);
+    }
   };
   return (
     <form

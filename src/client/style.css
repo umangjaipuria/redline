@@ -322,6 +322,12 @@ button:disabled { cursor: not-allowed; }
 .banner.notice { background: #fdf6e6; color: var(--amber); }
 .banner strong { font-weight: 700; }
 .banner button { margin-left: auto; border: 0; background: none; font-size: 14px; color: inherit; }
+.banner-action {
+  margin-left: auto;
+  padding: 3px 10px; border: 1px solid currentColor; border-radius: 6px;
+  background: none; color: inherit; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.banner-action + button { margin-left: 8px; }
 
 /* ---------- Workspace ---------- */
 

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks"
 import type { AnchorStatus, Thread } from "../core";
 import type { DocumentSessionInfo, DocumentStateResponse, SelectorInput } from "../shared";
 import { ApiError, api } from "./api";
+import { DocPoller } from "./poll";
 import { DocumentViewer } from "./viewer";
 import { FileBrowser } from "./file-browser";
 import { pushRecentFolder } from "./recent";
@@ -21,6 +22,7 @@ import {
 type Mode = "loading" | "empty" | "switcher" | "document";
 
 const ALIGN_MIN_WIDTH = 941; // below this the rail flows normally (no anchor alignment)
+const NAV_TIMEOUT_MS = 15_000; // a navigation fetch that outlasts this aborts, never hangs the UI
 
 export function App() {
   const [mode, setMode] = useState<Mode>("loading");
@@ -31,7 +33,7 @@ export function App() {
   const [activeThread, setActiveThread] = useState<string | null>(null);
   const [selection, setSelection] = useState<SelectorInput | null>(null);
   const [order, setOrder] = useState<string[]>([]);
-  const [notice, setNotice] = useState<{ title: string; body: string } | null>(null);
+  const [notice, setNotice] = useState<{ title: string; body: string; action?: { label: string; run: () => void } } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [browserOpen, setBrowserOpen] = useState(false);
   const [howtoPath, setHowtoPath] = useState<string | null>(null);
@@ -42,7 +44,17 @@ export function App() {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const viewerRef = useRef<DocumentViewer | null>(null);
   const lastRenderedRef = useRef<string>("");
-  const eventsRef = useRef<EventSource | null>(null);
+  const pollerRef = useRef<DocPoller | null>(null);
+  const stateRef = useRef<DocumentStateResponse | null>(null);
+  const docGoneRef = useRef<(docId: string) => void>(() => {});
+  // Monotonic navigation token: bumped once per navigation op via beginNavigation.
+  // Every async step captures the token and bails if it changed, so a slow request
+  // can never adopt a doc the user has since navigated away from. The paired
+  // controller aborts the previous op's in-flight fetch so superseded navigation
+  // never leaves a stalled connection behind.
+  const navGenRef = useRef(0);
+  const navControllerRef = useRef<AbortController | null>(null);
+  const docsRefreshRef = useRef<AbortController | null>(null);
   const activeDocRef = useRef<string | null>(null);
   const activeThreadRef = useRef<string | null>(null);
   const selectionRef = useRef<SelectorInput | null>(null);
@@ -59,6 +71,11 @@ export function App() {
   activeThreadRef.current = activeThread;
   selectionRef.current = selection;
   composerOpenRef.current = composerOpen;
+  // NOTE: stateRef is deliberately NOT assigned on every render. It mirrors the
+  // *committed* document state and is written only where state is committed
+  // (refreshFrom), primed (activate, before its deferred rAF), or cleared
+  // (goToChooser). A render-time assignment here would clobber a freshly primed
+  // snapshot with the pre-render state during activation.
 
   const setRailCollapsed = useCallback((collapsed: boolean) => {
     setRailCollapsedState(collapsed);
@@ -185,6 +202,10 @@ export function App() {
   }, [mode, resumeRailSync, selectThreadFromHighlight]);
 
   const refreshFrom = useCallback((next: DocumentStateResponse) => {
+    // Keep the ref in lockstep with the state synchronously: the poller reads it
+    // for the next conditional GET before React has re-rendered, so a just-loaded
+    // document's first poll sends the right version and 304s instead of re-fetching.
+    stateRef.current = next;
     setState(next);
     if (next.warning) {
       setNotice({ title: "Embedded review state could not be read", body: next.warning });
@@ -213,70 +234,221 @@ export function App() {
     }
   }, []);
 
-  const subscribe = useCallback(
-    (docId: string) => {
-      eventsRef.current?.close();
-      const source = new EventSource(`/api/docs/${docId}/events`);
-      const refetch = async () => {
-        try {
-          const next = await api.state(docId);
-          if (activeDocRef.current === docId) refreshFrom(next);
-        } catch {
-          // Doc may have closed; ignore.
-        }
-      };
-      for (const event of [
-        "comment.created",
-        "comment.replied",
-        "comment.edited",
-        "comment.deleted",
-        "anchors.reconciled",
-      ]) {
-        source.addEventListener(event, refetch);
-      }
-      source.addEventListener("external.changed", () => {
-        setNotice({ title: "Document changed on disk", body: "The file was edited outside Redline. Reloaded with anchors re-resolved." });
-        refetch();
-      });
-      source.addEventListener("document.closed", () => {
-        setNotice({ title: "Document closed", body: "This document was closed on the server." });
-      });
-      eventsRef.current = source;
+  // Single-flight, timeout-bounded refresh of the document list. Skips if one is
+  // already running (so focus + the switcher loop + reconnects can't stack
+  // requests) and pauses while hidden. Used everywhere the list may have changed.
+  const refreshDocs = useCallback(async () => {
+    if (docsRefreshRef.current || document.visibilityState === "hidden") return;
+    const controller = new AbortController();
+    docsRefreshRef.current = controller;
+    const timeout = setTimeout(() => controller.abort(), 8_000);
+    try {
+      setDocs((await api.listDocs(controller.signal)).docs);
+    } catch {
+      /* aborted or transient — the next tick retries */
+    } finally {
+      clearTimeout(timeout);
+      docsRefreshRef.current = null;
+    }
+  }, []);
+
+  // Start a navigation operation: supersede any prior one (abort its in-flight
+  // fetch, bump the token) and stop the poller so the doc we're leaving can't fire
+  // a 404 that invalidates this navigation. The signal also carries a hard deadline
+  // so a navigation fetch that hangs can't strand us with a stopped poller — it
+  // aborts, the caller hits its failure path, and the poller is resumed there.
+  // NOTE: this does NOT clear the notice or commit anything — a failed navigation
+  // must leave the prior document (and its banner) intact. Clearing happens only at
+  // the commit points (activate/adoptDoc/goToChooser).
+  const beginNavigation = useCallback((): { token: number; signal: AbortSignal } => {
+    navControllerRef.current?.abort();
+    const controller = new AbortController();
+    navControllerRef.current = controller;
+    pollerRef.current?.clearTarget();
+    const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(NAV_TIMEOUT_MS)]);
+    return { token: ++navGenRef.current, signal };
+  }, []);
+
+  // Resume polling the still-active document after a failed/aborted navigation, so
+  // the visible document doesn't sit frozen with a stopped poller.
+  const resumeActivePoll = useCallback(() => {
+    if (activeDocRef.current) pollerRef.current?.setTarget(activeDocRef.current);
+  }, []);
+
+  // Adopt `docId` into the (already document-mode) UI: fetch state FIRST, then
+  // commit only if this navigation token still holds. Does NOT own the token — the
+  // caller does — so callers can tell whether adoption actually committed.
+  const adoptDoc = useCallback(
+    async (docId: string, token: number, signal: AbortSignal): Promise<boolean> => {
+      const next = await api.state(docId, signal);
+      if (navGenRef.current !== token) return false; // navigated during the fetch
+      activeDocRef.current = docId;
+      setActiveDocId(docId);
+      lastRenderedRef.current = "";
+      stateRef.current = next;
+      setNotice(null); // committing a new doc — dismiss any prior doc's banner
+      refreshFrom(next);
+      pollerRef.current?.setTarget(docId);
+      const url = new URL(location.href);
+      url.searchParams.set("doc", docId);
+      history.replaceState(null, "", url);
+      // The doc list may now be stale (a reattach after restart, or a reopen):
+      // refresh it through the shared single-flight path so it can't accumulate.
+      void refreshDocs();
+      return true;
     },
-    [refreshFrom],
+    [refreshFrom, refreshDocs],
   );
 
+  // Enter document mode on `docId`. Owns a navigation op unless the caller passes
+  // an existing one (openFile begins the op around its openDoc call, then hands the
+  // same token/signal here so it isn't self-superseded). Fetches state first and
+  // commits only if the token still holds.
   const activate = useCallback(
-    async (docId: string) => {
+    async (docId: string, nav?: { token: number; signal: AbortSignal }) => {
+      const { token, signal } = nav ?? beginNavigation();
       try {
         setError(null);
+        const next = await api.state(docId, signal);
+        if (navGenRef.current !== token) return; // navigated away while loading
         activeDocRef.current = docId;
         setActiveDocId(docId);
         setActiveThread(null);
         setSelection(null);
         setComposerOpen(false);
         setComposerSelection(null);
-        const next = await api.state(docId);
         setMode("document");
         lastRenderedRef.current = "";
-        // refreshFrom needs the viewer; defer a tick so the iframe mounts.
-        requestAnimationFrame(() => refreshFrom(next));
-        subscribe(docId);
+        setNotice(null); // committed a new doc — dismiss any prior doc's banner
+        // Commit the state NOW so the new docId never pairs with the previous
+        // document's Rail state. Only the viewer load is deferred to a rAF (it
+        // needs the iframe mounted). stateRef is also primed so the poller's first
+        // tick sends this doc's version and 304s.
+        stateRef.current = next;
+        setState(next);
+        requestAnimationFrame(() => {
+          // Apply the initial render only if nothing newer landed first: the token
+          // still holds AND the poller hasn't already installed a fresher state
+          // (stateRef would no longer point at `next`). Prevents a fast first poll
+          // from being clobbered back to the activation snapshot.
+          if (navGenRef.current === token && stateRef.current === next) refreshFrom(next);
+        });
+        pollerRef.current?.setTarget(docId);
         const url = new URL(location.href);
         url.searchParams.set("doc", docId);
         history.replaceState(null, "", url);
       } catch (err) {
+        if (navGenRef.current !== token) return;
+        resumeActivePoll(); // this navigation failed — un-freeze the visible document
         setError(err instanceof Error ? err.message : "Could not open the document.");
       }
     },
-    [refreshFrom, subscribe],
+    [beginNavigation, refreshFrom, resumeActivePoll],
   );
+
+  // Reopen a closed document from its path, then transition fully into document
+  // mode (via activate) — a plain adopt would leave the UI stuck in switcher mode.
+  const reopenDoc = useCallback(
+    async (docPath: string) => {
+      const { token, signal } = beginNavigation();
+      try {
+        setError(null);
+        const info = await api.openDoc(docPath, signal);
+        if (navGenRef.current !== token) return;
+        await activate(info.docId, { token, signal });
+      } catch (err) {
+        if (navGenRef.current !== token) return; // superseded — swallow the abort
+        resumeActivePoll();
+        setError(err instanceof Error ? err.message : "Could not reopen that document.");
+      }
+    },
+    [beginNavigation, activate, resumeActivePoll],
+  );
+
+  // The poller reports a 404 for the active doc. DocIds are ephemeral across
+  // server restarts, so the same file may be back under a new id — or the doc was
+  // closed (here or from another tab). Re-resolve by the durable path: reattach
+  // silently if it's still open, offer to reopen if it's genuinely closed (a 404),
+  // and offer a retry if the server was merely unreachable.
+  const handleDocGone = useCallback(
+    async (goneDocId: string) => {
+      if (activeDocRef.current !== goneDocId) return;
+      const lostPath = stateRef.current?.path;
+      const { token, signal } = beginNavigation();
+      if (!lostPath) {
+        setNotice({ title: "Document closed", body: "This document is no longer open in Redline." });
+        return;
+      }
+      try {
+        const info = await api.resolveByPath(lostPath, signal);
+        if (navGenRef.current !== token) return; // navigated during re-resolve
+        // Only claim "Reconnected" if adoption actually committed.
+        if (await adoptDoc(info.docId, token, signal)) {
+          setNotice({ title: "Reconnected", body: "Redline reopened this document; reattached to it." });
+        }
+      } catch (err) {
+        if (navGenRef.current !== token) return;
+        if (err instanceof ApiError && err.status === 404) {
+          setNotice({
+            title: "Document closed",
+            body: "This document is no longer open in Redline.",
+            action: { label: "Reopen", run: () => void reopenDoc(lostPath) },
+          });
+        } else {
+          // Transient (server restarting / unreachable): let the user retry.
+          setNotice({
+            title: "Can't reach Redline",
+            body: "Lost the connection to the server.",
+            action: { label: "Retry", run: () => void docGoneRef.current(goneDocId) },
+          });
+        }
+      }
+    },
+    [beginNavigation, adoptDoc, reopenDoc],
+  );
+  docGoneRef.current = handleDocGone;
+
+  // The single adaptive poller drives all live updates now that SSE is gone. It
+  // reads the current doc/version from refs, so its identity is stable for the
+  // app's lifetime (created once).
+  useEffect(() => {
+    const poller = new DocPoller({
+      fetchState: (id, version, signal) => api.pollState(id, version, signal),
+      getKnownVersion: () => stateRef.current?.version,
+      onState: (next) => {
+        if (activeDocRef.current !== next.docId) return;
+        // A poll only yields state when the version changed, and our own writes
+        // round-trip via their POST response (so the next poll 304s) — so this is
+        // always a change from elsewhere. Only call it an on-disk edit if the
+        // rendered body actually changed AND we already had a baseline: a change
+        // seen before the initial render lands (empty baseline) is just the doc
+        // loading, and a state-only change (a comment from an agent/another tab)
+        // leaves the body identical and refreshes silently.
+        const hadBaseline = lastRenderedRef.current !== "";
+        const contentChanged = hadBaseline && next.renderedHtml !== lastRenderedRef.current;
+        refreshFrom(next);
+        if (contentChanged) {
+          setNotice({
+            title: "Document changed on disk",
+            body: "The file was edited outside Redline. Reloaded with anchors re-resolved.",
+          });
+        }
+      },
+      onUnknownDoc: (id) => docGoneRef.current(id),
+    });
+    pollerRef.current = poller;
+    return () => {
+      poller.dispose();
+      pollerRef.current = null;
+    };
+  }, [refreshFrom]);
 
   // Return to the document chooser (the landing surface for multiple open docs).
   const goToChooser = useCallback(() => {
-    eventsRef.current?.close();
-    eventsRef.current = null;
+    beginNavigation(); // supersede any in-flight activate/adopt and stop the poller
     activeDocRef.current = null;
+    stateRef.current = null; // stateRef mirrors committed state; nothing is committed now
+    setNotice(null); // leaving the document — dismiss its banner
     setActiveDocId(null);
     setState(null);
     setActiveThread(null);
@@ -287,7 +459,7 @@ export function App() {
     const url = new URL(location.href);
     url.searchParams.delete("doc");
     history.replaceState(null, "", url);
-  }, []);
+  }, [beginNavigation]);
 
   // Initial load: branch on the open documents.
   useEffect(() => {
@@ -313,22 +485,30 @@ export function App() {
     // Surface the bundled how-it-works doc on the landing page (absent in some
     // packaged builds — then the link simply doesn't appear).
     api.howto().then(({ path }) => setHowtoPath(path)).catch(() => {});
-    const serverEvents = new EventSource("/api/events");
-    const refreshDocs = async () => {
-      try {
-        setDocs((await api.listDocs()).docs);
-      } catch {
-        /* ignore */
-      }
-    };
-    serverEvents.addEventListener("document.opened", refreshDocs);
-    serverEvents.addEventListener("document.closed", refreshDocs);
-    return () => {
-      serverEvents.close();
-      eventsRef.current?.close();
-    };
+    // Keep the chooser's document list fresh when the window regains focus.
+    window.addEventListener("focus", refreshDocs);
+    return () => window.removeEventListener("focus", refreshDocs);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // While the chooser is on screen, keep its list live with a light poll (opens /
+  // closes from the CLI, agents, or other tabs). Self-scheduling so a slow request
+  // never lets a second one pile on, paused when hidden, and aborted on exit.
+  useEffect(() => {
+    if (mode !== "switcher") return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const loop = async () => {
+      await refreshDocs();
+      if (!cancelled) timer = setTimeout(loop, 5_000);
+    };
+    loop();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+      docsRefreshRef.current?.abort();
+    };
+  }, [mode, refreshDocs]);
 
   // On activation: highlight the anchor, scroll the document to center it, and
   // scroll the rail to reveal the active card (cards are a non-negative packed
@@ -355,19 +535,26 @@ export function App() {
   };
 
   const openFile = async (path: string) => {
+    // Own the navigation up front so the (signaled) openDoc and the follow-on
+    // activate share one token — a later concurrent navigation aborts this one
+    // instead of an older request finishing late and superseding the newer view.
+    const { token, signal } = beginNavigation();
     try {
-      const info = await api.openDoc(path);
+      const info = await api.openDoc(path, signal);
+      if (navGenRef.current !== token) return;
       pushRecentFolder(dirname(path));
       setBrowserOpen(false);
-      setDocs((await api.listDocs()).docs);
-      activate(info.docId);
+      void refreshDocs();
+      await activate(info.docId, { token, signal });
     } catch (err) {
+      if (navGenRef.current !== token) return; // superseded — swallow the abort
+      resumeActivePoll();
       setError(err instanceof Error ? err.message : "Could not open that file.");
     }
   };
 
-  // Close a document from the chooser. Frees its server-side watcher + SSE and
-  // drops it from the list; with nothing left we fall back to the empty state.
+  // Close a document from the chooser. Frees its server-side session and drops it
+  // from the list; with nothing left we fall back to the empty state.
   const closeFile = async (docId: string) => {
     try {
       setError(null);
@@ -380,13 +567,26 @@ export function App() {
     }
   };
 
-  const withWrite = async (fn: () => Promise<DocumentStateResponse>) => {
+  // Runs a write and commits its result — but ONLY if the same document is still
+  // active when it resolves. If the user navigated away (different doc, or away and
+  // back, both of which bump navGenRef), the result is fully dropped: no
+  // refreshFrom, no error/notice, and it RESOLVES to null (rather than throwing) so
+  // every caller's post-write continuation is skipped and can't touch the new
+  // document. Returns the fresh state on a committed write, or null when dropped.
+  const withWrite = async (
+    fn: () => Promise<DocumentStateResponse>,
+  ): Promise<DocumentStateResponse | null> => {
+    const originDoc = activeDocRef.current;
+    const originNav = navGenRef.current;
+    const stillCurrent = () => activeDocRef.current === originDoc && navGenRef.current === originNav;
     try {
       setError(null);
       const next = await fn();
+      if (!stillCurrent()) return null; // navigated away — drop the result
       refreshFrom(next);
       return next;
     } catch (err) {
+      if (!stillCurrent()) return null; // navigated away — swallow, don't rethrow
       if (err instanceof ApiError && err.status === 409 && err.current) {
         setNotice({ title: "Document changed", body: "Someone else updated this document. Reloaded the latest." });
         refreshFrom(err.current);
@@ -588,8 +788,8 @@ export function App() {
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
-  const createComment = async (text: string) => {
-    if (!docId || !state) return;
+  const createComment = async (text: string): Promise<boolean> => {
+    if (!docId || !state) return false;
     const prev = new Set(state.threads.map((t) => t.id));
     const next = await withWrite(() =>
       api.createComment(docId, {
@@ -599,6 +799,7 @@ export function App() {
         expectedVersion: state.version,
       }),
     );
+    if (!next) return false; // navigated away — don't touch the now-active document's UI
     setComposerOpen(false);
     setComposerSelection(null);
     viewerRef.current?.clearSelection();
@@ -607,6 +808,7 @@ export function App() {
       skipNextActiveThreadDocumentScrollRef.current.add(created.id);
       setActiveThread(created.id);
     }
+    return true;
   };
 
   const deleteThread = async (threadId: string) => {
@@ -724,6 +926,9 @@ export function App() {
       {notice && (
         <div class="banner notice" role="status">
           <strong>{notice.title}</strong> {notice.body}
+          {notice.action && (
+            <button type="button" class="banner-action" onClick={notice.action.run}>{notice.action.label}</button>
+          )}
           <button type="button" onClick={() => setNotice(null)}>✕</button>
         </div>
       )}
@@ -802,14 +1007,20 @@ export function App() {
             }}
             onCreateComment={createComment}
             onCancelComposer={cancelComposer}
-            onReply={(threadId, text) => withWrite(() => api.reply(docId, threadId, text, author, state.version))}
-            onEdit={(threadId, messageId, text) => withWrite(() => api.editMessage(docId, threadId, messageId, text, state.version))}
+            onReply={(threadId, text) =>
+              withWrite(() => api.reply(docId, threadId, text, author, state.version)).then((r) => r !== null)
+            }
+            onEdit={(threadId, messageId, text) =>
+              withWrite(() => api.editMessage(docId, threadId, messageId, text, state.version)).then((r) => r !== null)
+            }
             onDeleteReply={(threadId, messageId) => withWrite(() => api.deleteReply(docId, threadId, messageId, state.version))}
             onDeleteThread={deleteThread}
             onReanchor={(threadId) =>
               selection
-                ? withWrite(() => api.reanchor(docId, threadId, selection.quote, undefined, state.version)).then(() =>
-                    viewerRef.current?.clearSelection(),
+                ? withWrite(() => api.reanchor(docId, threadId, selection.quote, undefined, state.version)).then(
+                    (next) => {
+                      if (next) viewerRef.current?.clearSelection(); // skip if navigated away
+                    },
                   )
                 : Promise.resolve()
             }
